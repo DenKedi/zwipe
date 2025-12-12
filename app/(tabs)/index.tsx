@@ -1,19 +1,19 @@
-import { StyleSheet, View, Modal, TextInput, TouchableOpacity, Text, ScrollView } from 'react-native';
-import { ThemedView } from '@/components/themed-view';
-import { FolderStrip } from '@/components/FolderStrip';
-import { ZoneBar } from '@/components/ZoneBar';
-import { FileCanvas } from '@/components/FileCanvas';
 import { DrawingLayer } from '@/components/DrawingLayer';
-import { GestureDetector, Gesture } from 'react-native-gesture-handler';
-import { useSharedValue } from 'react-native-reanimated';
-import { useRef, useState } from 'react';
+import { FileCanvas } from '@/components/FileCanvas';
+import { FolderStrip } from '@/components/FolderStrip';
+import { ThemedView } from '@/components/themed-view';
+import { ZoneBar } from '@/components/ZoneBar';
 import { useFileSystem } from '@/hooks/useFileSystem';
-import { BreadcrumbSegment } from '@/types';
+import { BreadcrumbSegment, FileSystemItem } from '@/types';
 import { generateRandomFiles } from '@/utils/fileSystemHelpers';
+import { useRef, useState } from 'react';
+import { Modal, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { Gesture, GestureDetector } from 'react-native-gesture-handler';
+import { runOnJS, useAnimatedReaction, useSharedValue } from 'react-native-reanimated';
 
 export default function HomeScreen() {
   const [dimensions, setDimensions] = useState({ width: 0, height: 0 });
-  const { files, folders, createFolder, createFile } = useFileSystem();
+  const { files, folders, createFolder, createFile, moveFilesToFolder } = useFileSystem();
   
   // Navigation State
   const [currentFolderId, setCurrentFolderId] = useState<string | null>(null);
@@ -45,6 +45,42 @@ export default function HomeScreen() {
   const isDrawing = useSharedValue(false);
   const pointsX = useSharedValue<number[]>([]);
   const pointsY = useSharedValue<number[]>([]);
+
+  // Shared Value to hold live selection from UI thread
+  const activeSelection = useSharedValue<string[]>([]);
+  const canvasOffset = useSharedValue({ x: 0, y: 0 });
+  const folderStripY = useSharedValue(0);
+  const dropTargetFolderId = useSharedValue<string | null>(null);
+
+  // --- JS thread helpers
+  const handleSelectionUpdate = (newIds: string[]) => {
+    setSelectedFileIds(prev => {
+      const newSet = new Set(prev);
+      newIds.forEach(id => newSet.add(id));
+      return Array.from(newSet);
+    });
+  };
+
+  const handleResetSelection = () => {
+    setSelectedFileIds([]);
+  };
+  // -----------------------------------------------------
+
+  // Syncs UI-Thread selection with React State only when changed
+  useAnimatedReaction(
+    () => activeSelection.value,
+    (current, previous) => {
+      // Basic check to avoid redundant JS calls
+      if (JSON.stringify(current) !== JSON.stringify(previous)) {
+        // FIX: Pass raw data to named JS function instead of inline function
+        runOnJS(handleSelectionUpdate)(current);
+      }
+    }
+  );
+  
+  // File Size
+  const FILE_WIDTH = 100;
+  const FILE_HEIGHT = 100;
 
   // Get files for current folder
   const visibleFiles = files.filter(file => 
@@ -101,6 +137,7 @@ export default function HomeScreen() {
 
   // Toggle file selection (for testing)
   const handleFileSelect = (fileId: string) => {
+    //console.log(files)
     setSelectedFileIds(prev => {
       if (prev.includes(fileId)) {
         return prev.filter(id => id !== fileId);
@@ -108,6 +145,19 @@ export default function HomeScreen() {
         return [...prev, fileId];
       }
     });
+  };
+
+  // Clear selection when clicking on empty background
+  const handleBackgroundClick = () => {
+    setSelectedFileIds([]); 
+  };
+
+  // Handle drpping files in folder 
+  const handleDropAction = (targetId: string) => {
+    const filesToMove = files.filter(f => selectedFileIds.includes(f.id));
+    console.log(`Moving ${filesToMove.length} files to folder ${targetId}`, filesToMove);
+    moveFilesToFolder(selectedFileIds, targetId);
+    setSelectedFileIds([]);
   };
 
   // Gestures
@@ -159,11 +209,83 @@ export default function HomeScreen() {
       savedTranslateY.value = translateY.value;
     });
 
+// Intersection Helper for files
+  const calculateIntersectedIds = (
+    absX: number,
+    absY: number,
+    visibleFiles: FileSystemItem[],
+    currentScale: number,
+    transX: number,
+    transY: number,
+    offX: number, // Neuer Parameter
+    offY: number  // Neuer Parameter
+  ): string[] => {
+    'worklet'; 
+    // Hier wird der Offset abgezogen, bevor durch Scale geteilt wird
+    const canvasX = (absX - offX - transX) / currentScale;
+    const canvasY = (absY - offY - transY) / currentScale;
+
+    const selectionArea = {
+      minX: canvasX - 5,
+      minY: canvasY - 5,
+      maxX: canvasX + 5,
+      maxY: canvasY + 5,
+    };
+
+    const intersectedIds: string[] = [];
+
+    for (const file of visibleFiles) {
+      if (
+        selectionArea.maxX > file.x &&
+        selectionArea.minX < file.x + FILE_WIDTH &&
+        selectionArea.maxY > file.y &&
+        selectionArea.minY < file.y + FILE_HEIGHT
+      ) {
+        intersectedIds.push(file.id);
+      }
+    }
+    return intersectedIds;
+  };
+
+// Intersection Helper for folder
+  const checkFolderIntersection = (absX: number, absY: number, foldersList: typeof currentFolders): string | null => {
+    'worklet';
+    const CARD_WIDTH = 100;
+    const GAP = 12;
+    const PADDING_LEFT = 16;
+    const OFFSET_TOP = 120;
+    const CARD_HEIGHT = 60;
+
+    const stripY = folderStripY.value;
+    const minY = stripY + OFFSET_TOP;
+    const maxY = minY + CARD_HEIGHT;
+
+    if (absY < minY || absY > maxY) {
+      return null;
+    }
+
+    const xInStrip = absX - PADDING_LEFT;
+    const itemStride = CARD_WIDTH + GAP;
+    
+    const index = Math.floor(xInStrip / itemStride);
+
+    if (index >= 0 && index < foldersList.length) {
+      const itemStart = index * itemStride;
+      if (xInStrip >= itemStart && xInStrip <= itemStart + CARD_WIDTH) {
+        return foldersList[index].id;
+      }
+    }
+
+    return null;
+  };
+
   const panGesture = Gesture.Pan()
     .minPointers(1)
     .maxPointers(1)
     .onStart((e) => {
       'worklet';
+      runOnJS(handleResetSelection)(); 
+      activeSelection.value = []; 
       isDrawing.value = true;
       pointsX.value = [e.absoluteX];
       pointsY.value = [e.absoluteY];
@@ -178,6 +300,15 @@ export default function HomeScreen() {
       if (isDrawing.value) {
         currentX.value = e.absoluteX;
         currentY.value = e.absoluteY;
+
+        //Debug log
+        //console.log("X: ", Math.floor(currentX.value), " Y: ", Math.floor(currentY.value));
+
+        // Calculate intersections and udate SharedValue 
+        const ids = calculateIntersectedIds(
+          e.absoluteX, e.absoluteY, visibleFiles, scale.value, translateX.value, translateY.value, canvasOffset.value.x, canvasOffset.value.y
+        );
+        activeSelection.value = ids;
         
         // Add new point
         const newPointsX = [...pointsX.value, e.absoluteX];
@@ -206,11 +337,23 @@ export default function HomeScreen() {
           
           path.value = pathStr;
         }
+
+        const folderId = checkFolderIntersection(e.absoluteX, e.absoluteY, currentFolders);
+        if (folderId) {
+          dropTargetFolderId.value = folderId;
+        }
       }
     })
     .onEnd(() => {
+      console.log(dropTargetFolderId.value);
       'worklet';
       isDrawing.value = false;
+
+      const targetId = dropTargetFolderId.value;
+      if (targetId) {
+        runOnJS(handleDropAction)(targetId);
+      }
+      dropTargetFolderId.value = null;
       
       // Clear drawing
       path.value = '';
@@ -221,15 +364,38 @@ export default function HomeScreen() {
       currentX.value = 0;
       currentY.value = 0;
       
-      // Note: Intersection detection disabled for now - needs proper implementation
-      // TODO: Implement intersection detection with proper coordinate transformation
+      // TODO: Fix coordinate transformation while zoomed out
     });
 
   // Combine gestures: Pinch (2 fingers) and Pan (1 finger) can run simultaneously
   // But actually, we want them to be exclusive based on pointers.
   // Simultaneous allows both. If I use 2 fingers, Pan might also trigger if I don't limit it.
   // I limited Pan to maxPointers(1).
-  const composedGesture = Gesture.Simultaneous(pinchGesture, panGesture);
+
+  // Tap Gesture to clear selection
+  const tapGesture = Gesture.Tap()
+    .onEnd((e) => {
+      'worklet';
+      // Wir nutzen deine existierende Funktion, um zu prüfen, ob wir etwas treffen
+      const ids = calculateIntersectedIds(
+        e.absoluteX,
+        e.absoluteY,
+        visibleFiles,
+        scale.value,
+        translateX.value,
+        translateY.value,
+        canvasOffset.value.x, // Offset X
+        canvasOffset.value.y  // Offset Y
+      );
+
+      // Wenn die Liste leer ist, haben wir ins Leere geklickt
+      if (ids.length === 0) {
+        runOnJS(handleBackgroundClick)();
+      }
+    });
+
+
+  const composedGesture = Gesture.Simultaneous(pinchGesture, panGesture, tapGesture);
 
   return (
     <GestureDetector gesture={composedGesture}>
@@ -260,7 +426,12 @@ export default function HomeScreen() {
         </View>
 
         {/* 20% - Folder Strip */}
-        <View style={styles.folderSection}>
+        <View 
+          style={styles.folderSection}
+          onLayout={(e) => {
+            folderStripY.value = e.nativeEvent.layout.y;
+          }}
+        >
           <FolderStrip 
             folders={currentFolders}
             onFolderPress={handleFolderPress}
@@ -274,7 +445,16 @@ export default function HomeScreen() {
         </View>
 
         {/* 75% - Canvas */}
-        <View style={styles.canvasSection}>
+        <View 
+          style={styles.canvasSection}
+          onLayout={(e) => {
+            // Schritt 2: Messen des Offsets (Versatz von oben/links)
+            canvasOffset.value = { 
+              x: e.nativeEvent.layout.x, 
+              y: e.nativeEvent.layout.y 
+            };
+          }}
+        >
           <View style={styles.canvasHeader}>
             <TouchableOpacity style={styles.addTestButton} onPress={handleAddTestFiles}>
               <Text style={styles.addTestButtonText}>+ Add Test Files</Text>
