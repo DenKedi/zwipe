@@ -1,8 +1,8 @@
-import { StyleSheet, View, Text, ScrollView, TouchableOpacity } from 'react-native';
-import { ThemedView } from './themed-view';
 import { useLayoutStore } from '@/store/useLayoutStore';
 import { Folder } from '@/types';
-import { Plus, Folder as FolderIcon } from 'lucide-react-native';
+import { Folder as FolderIcon, Plus } from 'lucide-react-native';
+import { ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { ThemedView } from './themed-view';
 
 interface FolderStripProps {
   folders: Folder[];
