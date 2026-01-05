@@ -2,11 +2,11 @@ import { DrawingLayer } from '@/components/DrawingLayer';
 import { FileCanvas } from '@/components/FileCanvas';
 import { FolderStrip } from '@/components/FolderStrip';
 import { ThemedView } from '@/components/themed-view';
-import { ZoneBar } from '@/components/ZoneBar';
+import { ZoneBar, zones } from '@/components/ZoneBar';
 import { useFileSystem } from '@/hooks/useFileSystem';
-import { BreadcrumbSegment, FileSystemItem } from '@/types';
+import { BreadcrumbSegment, FileSystemItem, ZoneType } from '@/types';
 import { generateRandomFiles } from '@/utils/fileSystemHelpers';
-import { memo, useCallback, useMemo, useRef, useState } from 'react';
+import { useCallback, useMemo, useRef, useState } from 'react';
 import { Modal, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import { runOnJS, useAnimatedReaction, useSharedValue } from 'react-native-reanimated';
@@ -51,6 +51,29 @@ export default function HomeScreen() {
   const canvasLayout = useSharedValue({ x: 0, y: 0, width: 0, height: 0 });
   const folderStripY = useSharedValue(0);
   const dropTargetFolderId = useSharedValue<string | null>(null);
+
+  // Zone Colors - matching ZoneBar component
+  const zoneColors: Record<ZoneType, string> = {
+    trash: '#ef4444',    // Red
+    temp: '#8b5cf6',      // Purple
+    copy: '#10b981', // Green
+    share: '#3b82f6',     // Blue
+    'folder-strip': '#f59e0b', // Amber
+  };
+
+  // Default gradient colors
+  const defaultGradient = {
+    start: '#576ffb',
+    end: '#f865c4',
+  };
+
+  // Gradient colors as React State (for DrawingLayer re-render)
+  const [gradientStartColor, setGradientStartColor] = useState(defaultGradient.start);
+  const [gradientEndColor, setGradientEndColor] = useState(defaultGradient.end);
+  
+  // Hovered zone tracking
+  const hoveredZoneType = useSharedValue<ZoneType | null>(null);
+  const zoneBarLayout = useSharedValue({ x: 0, y: 0, width: 0, height: 0 });
   
   // Ref kept for potential future measurements/debug
   const canvasSectionRef = useRef<View>(null);
@@ -66,6 +89,16 @@ export default function HomeScreen() {
 
   const handleResetSelection = () => {
     setSelectedFileIds([]);
+  };
+
+  const handleGradientUpdate = (startColor: string, endColor: string) => {
+    setGradientStartColor(startColor);
+    setGradientEndColor(endColor);
+  };
+
+  const handleResetGradient = () => {
+    setGradientStartColor(defaultGradient.start);
+    setGradientEndColor(defaultGradient.end);
   };
   // -----------------------------------------------------
 
@@ -205,7 +238,10 @@ export default function HomeScreen() {
 
       const focalX = e.focalX - canvasLayout.value.x;
       const focalY = e.focalY - canvasLayout.value.y;
-      const newScale = pinchStartValues.current.scale * e.scale;
+      let newScale = pinchStartValues.current.scale * e.scale;
+      
+      // Limit zoom: min 0.3x, max 3x
+      newScale = Math.max(0.3, Math.min(3, newScale));
       
       scale.value = newScale;
 
@@ -277,23 +313,28 @@ export default function HomeScreen() {
   };
 
 // Intersection Helper for folder
-  const checkFolderIntersection = (absX: number, absY: number, foldersList: typeof currentFolders): string | null => {
+  const checkFolderIntersection = (x: number, y: number, foldersList: typeof currentFolders): string | null => {
     'worklet';
-    const CARD_WIDTH = 100;
-    const GAP = 12;
-    const PADDING_LEFT = 16;
-    const OFFSET_TOP = 120;
-    const CARD_HEIGHT = 60;
+    const CARD_WIDTH = 120;  // Actual card width from FolderStrip styles
+    const GAP = 12;          // marginRight from folderCard style
+    const PADDING_LEFT = 16; // folderScroll paddingHorizontal
+    const HEADER_HEIGHT = 47; // folderHeader2 height (approx)
+    const CARD_HEIGHT = 76;   // Actual card height from FolderStrip styles
 
+    // folderStripY gives us the Y position of the FolderStrip container
     const stripY = folderStripY.value;
-    const minY = stripY + OFFSET_TOP;
+    
+    // Cards start after the header (with New button)
+    const minY = stripY + HEADER_HEIGHT;
     const maxY = minY + CARD_HEIGHT;
 
-    if (absY < minY || absY > maxY) {
+    // Check if Y is within folder strip bounds
+    if (y < minY || y > maxY) {
       return null;
     }
 
-    const xInStrip = absX - PADDING_LEFT;
+    // Calculate X position relative to scroll content
+    const xInStrip = x - PADDING_LEFT;
     const itemStride = CARD_WIDTH + GAP;
     
     const index = Math.floor(xInStrip / itemStride);
@@ -308,12 +349,41 @@ export default function HomeScreen() {
     return null;
   };
 
+  // Intersection Helper for zones
+  const checkZoneIntersection = (x: number, y: number): ZoneType | null => {
+    'worklet';
+    const zoneBarY = zoneBarLayout.value.y;
+    const zoneBarHeight = zoneBarLayout.value.height;
+    const zoneBarWidth = zoneBarLayout.value.width;
+    
+    // Check if Y is within zone bar bounds
+    if (y < zoneBarY || y > zoneBarY + zoneBarHeight) {
+      return null;
+    }
+    
+    // Calculate which zone we're over based on X position
+    // Zones are evenly distributed with padding
+    const PADDING_HORIZONTAL = 32;
+    const effectiveWidth = zoneBarWidth - (PADDING_HORIZONTAL * 2);
+    const zoneWidth = effectiveWidth / zones.length;
+    
+    const xInZoneBar = x - PADDING_HORIZONTAL;
+    const zoneIndex = Math.floor(xInZoneBar / zoneWidth);
+    
+    if (zoneIndex >= 0 && zoneIndex < zones.length) {
+      return zones[zoneIndex].type;
+    }
+    
+    return null;
+  };
+
   const panGesture = Gesture.Pan()
     .minPointers(1)
     .maxPointers(1)
     .onStart((e) => {
       'worklet';
       runOnJS(handleResetSelection)(); 
+      runOnJS(handleResetGradient)();
       activeSelection.value = []; 
       isDrawing.value = true;
       pointsX.value = [e.x];
@@ -323,6 +393,7 @@ export default function HomeScreen() {
       currentX.value = e.x;
       currentY.value = e.y;
       path.value = `M ${e.x} ${e.y}`;
+      hoveredZoneType.value = null;
     })
     .onUpdate((e) => {
       'worklet';
@@ -376,15 +447,35 @@ export default function HomeScreen() {
           path.value = pathStr;
         }
 
+        // Check folder intersection
         const folderId = checkFolderIntersection(e.x, e.y, currentFolders);
         if (folderId) {
           dropTargetFolderId.value = folderId;
+          hoveredZoneType.value = null;
+          runOnJS(handleResetGradient)();
+        } else {
+          dropTargetFolderId.value = null;
+          
+          // Check zone intersection
+          const zoneType = checkZoneIntersection(e.x, e.y);
+          if (zoneType && zoneType !== hoveredZoneType.value) {
+            hoveredZoneType.value = zoneType;
+            // Update gradient colors based on zone
+            runOnJS(handleGradientUpdate)(zoneColors[zoneType], '#ffffff');
+          } else if (!zoneType && hoveredZoneType.value !== null) {
+            const previousZone = hoveredZoneType.value;
+            hoveredZoneType.value = null;
+            // Don't reset gradient if leaving duplicate/copy zone
+            if (previousZone !== 'copy') {
+              runOnJS(handleResetGradient)();
+            }
+          }
         }
       }
     })
     .onEnd(() => {
-      console.log(dropTargetFolderId.value);
       'worklet';
+      console.log(dropTargetFolderId.value);
       isDrawing.value = false;
 
       const targetId = dropTargetFolderId.value;
@@ -392,6 +483,10 @@ export default function HomeScreen() {
         runOnJS(handleDropAction)(targetId);
       }
       dropTargetFolderId.value = null;
+      hoveredZoneType.value = null;
+      
+      // Reset gradient colors
+      runOnJS(handleResetGradient)();
       
       // Clear drawing
       path.value = '';
@@ -476,12 +571,20 @@ export default function HomeScreen() {
             folders={currentFolders}
             onFolderPress={handleFolderPress}
             onNewFolder={handleNewFolder}
+            dropTargetFolderId={dropTargetFolderId}
+            hoverColor={gradientEndColor}
           />
         </View>
 
         {/* 5% - Zone Bar */}
-        <View style={styles.zoneSection}>
-          <ZoneBar />
+        <View 
+          style={styles.zoneSection}
+          onLayout={(e) => {
+            const { x, y, width, height } = e.nativeEvent.layout;
+            zoneBarLayout.value = { x, y, width, height };
+          }}
+        >
+          <ZoneBar hoveredZoneType={hoveredZoneType} />
         </View>
 
         {/* 75% - Canvas */}
@@ -516,6 +619,8 @@ export default function HomeScreen() {
           startY={startY}
           currentX={currentX}
           currentY={currentY}
+          gradientStart={gradientStartColor}
+          gradientEnd={gradientEndColor}
         />
 
         {/* New Folder Modal */}
