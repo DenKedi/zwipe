@@ -6,8 +6,8 @@ import { ZoneBar } from '@/components/ZoneBar';
 import { useFileSystem } from '@/hooks/useFileSystem';
 import { BreadcrumbSegment, FileSystemItem } from '@/types';
 import { generateRandomFiles } from '@/utils/fileSystemHelpers';
-import { useRef, useState } from 'react';
-import { Modal, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { memo, useCallback, useMemo, useRef, useState } from 'react';
+import { findNodeHandle, Modal, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, UIManager, View } from 'react-native';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import { runOnJS, useAnimatedReaction, useSharedValue } from 'react-native-reanimated';
 
@@ -51,6 +51,18 @@ export default function HomeScreen() {
   const canvasOffset = useSharedValue({ x: 0, y: 0 });
   const folderStripY = useSharedValue(0);
   const dropTargetFolderId = useSharedValue<string | null>(null);
+  
+  // Ref to measure canvas absolute position
+  const canvasSectionRef = useRef<View>(null);
+  
+  // Measure absolute position of canvas section
+  const measureCanvasOffset = useCallback(() => {
+    if (canvasSectionRef.current) {
+      canvasSectionRef.current.measureInWindow((x, y, width, height) => {
+        canvasOffset.value = { x: x || 0, y: y || 0 };
+      });
+    }
+  }, [canvasOffset]);
 
   // --- JS thread helpers
   const handleSelectionUpdate = (newIds: string[]) => {
@@ -82,36 +94,39 @@ export default function HomeScreen() {
   const FILE_WIDTH = 100;
   const FILE_HEIGHT = 100;
 
-  // Get files for current folder
-  const visibleFiles = files.filter(file => 
-    currentFolderId ? file.parentId === currentFolderId : !file.parentId
-  );
-  const currentFolders = folders.filter(folder => 
-    currentFolderId ? folder.parentId === currentFolderId : !folder.parentId
-  );
+  // Memoize visible files and folders to prevent unnecessary re-renders
+  const visibleFiles = useMemo(() => 
+    files.filter(file => 
+      currentFolderId ? file.parentId === currentFolderId : !file.parentId
+    ), [files, currentFolderId]);
+  
+  const currentFolders = useMemo(() => 
+    folders.filter(folder => 
+      currentFolderId ? folder.parentId === currentFolderId : !folder.parentId
+    ), [folders, currentFolderId]);
 
-  // Navigation Handlers
-  const handleFolderPress = (folderId: string) => {
+  // Navigation Handlers - memoized to prevent child re-renders
+  const handleFolderPress = useCallback((folderId: string) => {
     const folder = folders.find(f => f.id === folderId);
     if (folder) {
       setCurrentFolderId(folderId);
-      setBreadcrumbs([...breadcrumbs, { id: folderId, name: folder.name }]);
+      setBreadcrumbs(prev => [...prev, { id: folderId, name: folder.name }]);
     }
-  };
+  }, [folders]);
 
-  const handleBreadcrumbPress = (folderId: string) => {
+  const handleBreadcrumbPress = useCallback((folderId: string) => {
     const index = breadcrumbs.findIndex(b => b.id === folderId);
     if (index !== -1) {
       setBreadcrumbs(breadcrumbs.slice(0, index + 1));
       setCurrentFolderId(folderId === 'home' ? null : folderId);
     }
-  };
+  }, [breadcrumbs]);
 
-  const handleNewFolder = () => {
+  const handleNewFolder = useCallback(() => {
     setShowNewFolderModal(true);
-  };
+  }, []);
 
-  const handleCreateFolder = () => {
+  const handleCreateFolder = useCallback(() => {
     if (newFolderName.trim()) {
       const newFolder = createFolder(newFolderName.trim(), currentFolderId || undefined);
       console.log('Folder created:', newFolder);
@@ -120,24 +135,23 @@ export default function HomeScreen() {
     } else {
       console.log('No folder name provided');
     }
-  };
+  }, [newFolderName, currentFolderId, createFolder]);
 
-  const handleCancelNewFolder = () => {
+  const handleCancelNewFolder = useCallback(() => {
     setNewFolderName('');
     setShowNewFolderModal(false);
-  };
+  }, []);
 
   // Add test files handler
-  const handleAddTestFiles = () => {
+  const handleAddTestFiles = useCallback(() => {
     const newFiles = generateRandomFiles(5, currentFolderId || undefined, true);
     newFiles.forEach(file => {
       createFile(file.name, file.x, file.y, file.parentId);
     });
-  };
+  }, [currentFolderId, createFile]);
 
-  // Toggle file selection (for testing)
-  const handleFileSelect = (fileId: string) => {
-    //console.log(files)
+  // Toggle file selection
+  const handleFileSelect = useCallback((fileId: string) => {
     setSelectedFileIds(prev => {
       if (prev.includes(fileId)) {
         return prev.filter(id => id !== fileId);
@@ -145,20 +159,20 @@ export default function HomeScreen() {
         return [...prev, fileId];
       }
     });
-  };
+  }, []);
 
   // Clear selection when clicking on empty background
-  const handleBackgroundClick = () => {
+  const handleBackgroundClick = useCallback(() => {
     setSelectedFileIds([]); 
-  };
+  }, []);
 
-  // Handle drpping files in folder 
-  const handleDropAction = (targetId: string) => {
+  // Handle dropping files in folder 
+  const handleDropAction = useCallback((targetId: string) => {
     const filesToMove = files.filter(f => selectedFileIds.includes(f.id));
     console.log(`Moving ${filesToMove.length} files to folder ${targetId}`, filesToMove);
     moveFilesToFolder(selectedFileIds, targetId);
     setSelectedFileIds([]);
-  };
+  }, [files, selectedFileIds, moveFilesToFolder]);
 
   // Gestures
   const pinchStartValues = useRef({
@@ -217,13 +231,15 @@ export default function HomeScreen() {
     currentScale: number,
     transX: number,
     transY: number,
-    offX: number, // Neuer Parameter
-    offY: number  // Neuer Parameter
+    offX: number,
+    offY: number
   ): string[] => {
     'worklet'; 
-    // Hier wird der Offset abgezogen, bevor durch Scale geteilt wird
-    const canvasX = (absX - offX - transX) / currentScale;
-    const canvasY = (absY - offY - transY) / currentScale;
+    // Transform in FileCanvas: translateX -> translateY -> scale (applied in order)
+    // This means: screenPos = (canvasPos + translate) * scale + canvasOffset
+    // Solving for canvasPos: canvasPos = (screenPos - canvasOffset) / scale - translate
+    const canvasX = (absX - offX) / currentScale - transX;
+    const canvasY = (absY - offY) / currentScale - transY;
 
     const selectionArea = {
       minX: canvasX - 5,
@@ -446,13 +462,11 @@ export default function HomeScreen() {
 
         {/* 75% - Canvas */}
         <View 
+          ref={canvasSectionRef}
           style={styles.canvasSection}
-          onLayout={(e) => {
-            // Schritt 2: Messen des Offsets (Versatz von oben/links)
-            canvasOffset.value = { 
-              x: e.nativeEvent.layout.x, 
-              y: e.nativeEvent.layout.y 
-            };
+          onLayout={() => {
+            // Use measureInWindow for absolute screen coordinates
+            measureCanvasOffset();
           }}
         >
           <View style={styles.canvasHeader}>

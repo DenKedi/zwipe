@@ -1,7 +1,8 @@
+import { memo, useEffect } from 'react';
 import { StyleSheet, View, Text, TouchableOpacity } from 'react-native';
-import Animated, { useAnimatedStyle, withSpring } from 'react-native-reanimated';
+import Animated, { useAnimatedStyle, useSharedValue, withSpring } from 'react-native-reanimated';
 import { FileSystemItem } from '@/types';
-import { FileText, Image as ImageIcon, File, FileSpreadsheet } from 'lucide-react-native';
+import { FileText, Image as ImageIcon, File, FileSpreadsheet, Film, Music, Archive } from 'lucide-react-native';
 
 interface FileItemProps {
   file: FileSystemItem;
@@ -11,7 +12,12 @@ interface FileItemProps {
   onLayout?: (layout: { x: number; y: number; width: number; height: number }) => void;
 }
 
-export function FileItem({ file, isSelected, selectionColor = '#576ffb', onPress, onLayout }: FileItemProps) {
+export const FileItem = memo(function FileItem({ file, isSelected, selectionColor = '#576ffb', onPress, onLayout }: FileItemProps) {
+  const selected = useSharedValue(isSelected ? 1 : 0);
+
+  useEffect(() => {
+    selected.value = isSelected ? 1 : 0;
+  }, [isSelected, selected]);
   const fileExtension = file.extension?.toLowerCase();
   
   const getFileIcon = () => {
@@ -25,7 +31,22 @@ export function FileItem({ file, isSelected, selectionColor = '#576ffb', onPress
       case 'jpeg':
       case 'png':
       case 'gif':
+      case 'webp':
+      case 'svg':
         return <ImageIcon size={size} color="#10b981" />;
+      case 'mp4':
+      case 'mov':
+      case 'avi':
+      case 'mkv':
+        return <Film size={size} color="#8b5cf6" />;
+      case 'mp3':
+      case 'wav':
+      case 'flac':
+        return <Music size={size} color="#f59e0b" />;
+      case 'zip':
+      case 'rar':
+      case '7z':
+        return <Archive size={size} color="#64748b" />;
       case 'txt':
         return <FileText size={size} color={color} />;
       case 'doc':
@@ -33,7 +54,11 @@ export function FileItem({ file, isSelected, selectionColor = '#576ffb', onPress
         return <FileText size={size} color="#3b82f6" />;
       case 'xlsx':
       case 'xls':
+      case 'csv':
         return <FileSpreadsheet size={size} color="#10b981" />;
+      case 'pptx':
+      case 'ppt':
+        return <FileText size={size} color="#f97316" />;
       default:
         return <File size={size} color={color} />;
     }
@@ -42,7 +67,7 @@ export function FileItem({ file, isSelected, selectionColor = '#576ffb', onPress
   const animatedStyle = useAnimatedStyle(() => {
     return {
       transform: [
-        { scale: withSpring(isSelected ? 1.08 : 1) },
+        { scale: withSpring(selected.value ? 1.1 : 1, { damping: 12, stiffness: 180 }) },
       ],
     };
   });
@@ -87,29 +112,29 @@ export function FileItem({ file, isSelected, selectionColor = '#576ffb', onPress
               borderWidth: 3,
               shadowColor: selectionColor,
               shadowOffset: { width: 0, height: 0 },
-              shadowOpacity: 0.8,
-              shadowRadius: 8,
-              elevation: 8,
+              shadowOpacity: 0.9,
+              shadowRadius: 12,
+              elevation: 10,
             },
           ]}
         >
-        {/* Preview for images */}
-        {(fileExtension === 'jpg' || fileExtension === 'jpeg' || fileExtension === 'png') ? (
-          <View style={styles.imagePreview}>
-            {getFileIcon()}
-          </View>
-        ) : (
-          <View style={styles.iconContainer}>{getFileIcon()}</View>
-        )}
-        
-        <Text style={styles.name} numberOfLines={2}>
-          {truncateFilename(file.name)}
-        </Text>
-      </View>
+          {/* Preview for images */}
+          {(fileExtension === 'jpg' || fileExtension === 'jpeg' || fileExtension === 'png' || fileExtension === 'gif' || fileExtension === 'webp') ? (
+            <View style={styles.imagePreview}>
+              {getFileIcon()}
+            </View>
+          ) : (
+            <View style={styles.iconContainer}>{getFileIcon()}</View>
+          )}
+          
+          <Text style={styles.name} numberOfLines={2}>
+            {truncateFilename(file.name)}
+          </Text>
+        </View>
       </TouchableOpacity>
     </Animated.View>
   );
-}
+})
 
 const styles = StyleSheet.create({
   container: {
