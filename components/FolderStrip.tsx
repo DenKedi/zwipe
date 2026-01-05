@@ -2,14 +2,23 @@ import { useLayoutStore } from '@/store/useLayoutStore';
 import { useFileSystemStore } from '@/store/useFileSystemStore';
 import { Folder } from '@/types';
 import { Folder as FolderIcon, Plus, ChevronRight } from 'lucide-react-native';
-import { memo, useMemo } from 'react';
+import { memo, useMemo, useEffect } from 'react';
 import { ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { ThemedView } from './themed-view';
+import Animated, { 
+  useAnimatedStyle, 
+  useSharedValue, 
+  withSpring, 
+  SharedValue,
+  useDerivedValue 
+} from 'react-native-reanimated';
 
 interface FolderStripProps {
   folders: Folder[];
   onFolderPress: (folderId: string) => void;
   onNewFolder: () => void;
+  dropTargetFolderId?: SharedValue<string | null>;
+  hoverColor?: string;
 }
 
 interface FolderStats {
@@ -19,50 +28,74 @@ interface FolderStats {
   totalFiles: number;
 }
 
-// Memoized folder card component
+// Memoized folder card component with hover animation
 const FolderCard = memo(function FolderCard({ 
   folder, 
   stats,
-  onPress 
+  onPress,
+  isDropTarget,
+  hoverColor = '#f865c4',
 }: { 
   folder: Folder; 
   stats: FolderStats;
   onPress: () => void;
+  isDropTarget: SharedValue<boolean>;
+  hoverColor?: string;
 }) {
+  // Animated styles for hover effect
+  const animatedContainerStyle = useAnimatedStyle(() => {
+    const isHovered = isDropTarget.value;
+    return {
+      transform: [
+        { scale: withSpring(isHovered ? 1.05 : 1, { damping: 20, stiffness: 180 }) },
+      ],
+      borderColor: isHovered ? hoverColor : '#fbbf24',
+      borderWidth: withSpring(isHovered ? 3 : 1.5, { damping: 20, stiffness: 180 }),
+      shadowColor: isHovered ? hoverColor : 'transparent',
+      shadowOpacity: withSpring(isHovered ? 0.5 : 0, { damping: 20, stiffness: 180 }),
+      shadowRadius: withSpring(isHovered ? 10 : 0, { damping: 20, stiffness: 180 }),
+      shadowOffset: { width: 0, height: 0 },
+    };
+  });
+
   return (
-    <TouchableOpacity
-      style={styles.folderCard}
-      onPress={onPress}
-      activeOpacity={0.7}
-    >
-      <View style={styles.folderHeader}>
-        <FolderIcon size={20} color="#fbbf24" fill="#fbbf24" />
-        <Text style={styles.folderName} numberOfLines={1}>
-          {folder.name}
-        </Text>
-      </View>
-      <View style={styles.folderStats}>
-        <View style={styles.statRow}>
-          <Text style={styles.statDirect}>{stats.directFolders}</Text>
-          <Text style={styles.statSeparator}>|</Text>
-          <Text style={styles.statTotal}>{stats.totalFolders}</Text>
-          <Text style={styles.statLabel}>Folders</Text>
+    <Animated.View style={[styles.folderCard, animatedContainerStyle]}>
+      <TouchableOpacity
+        style={styles.folderCardInner}
+        onPress={onPress}
+        activeOpacity={0.7}
+      >
+        <View style={styles.folderHeader}>
+          <FolderIcon size={20} color="#fbbf24" fill="#fbbf24" />
+          <Text style={styles.folderName} numberOfLines={1}>
+            {folder.name}
+          </Text>
         </View>
-        <View style={styles.statRow}>
-          <Text style={styles.statDirect}>{stats.directFiles}</Text>
-          <Text style={styles.statSeparator}>|</Text>
-          <Text style={styles.statTotal}>{stats.totalFiles}</Text>
-          <Text style={styles.statLabel}>Files</Text>
+        <View style={styles.folderStats}>
+          <View style={styles.statRow}>
+            <Text style={styles.statDirect}>{stats.directFolders}</Text>
+            <Text style={styles.statSeparator}>|</Text>
+            <Text style={styles.statTotal}>{stats.totalFolders}</Text>
+            <Text style={styles.statLabel}>Folders</Text>
+          </View>
+          <View style={styles.statRow}>
+            <Text style={styles.statDirect}>{stats.directFiles}</Text>
+            <Text style={styles.statSeparator}>|</Text>
+            <Text style={styles.statTotal}>{stats.totalFiles}</Text>
+            <Text style={styles.statLabel}>Files</Text>
+          </View>
         </View>
-      </View>
-    </TouchableOpacity>
+      </TouchableOpacity>
+    </Animated.View>
   );
 });
 
 export const FolderStrip = memo(function FolderStrip({ 
   folders, 
   onFolderPress, 
-  onNewFolder 
+  onNewFolder,
+  dropTargetFolderId,
+  hoverColor = '#f865c4',
 }: FolderStripProps) {
   const registerItem = useLayoutStore((state) => state.registerItem);
   const allFiles = useFileSystemStore((state) => state.files);
@@ -130,16 +163,47 @@ export const FolderStrip = memo(function FolderStrip({
           </View>
         ) : (
           folders.map((folder) => (
-            <FolderCard
+            <FolderCardWrapper
               key={folder.id}
               folder={folder}
               stats={folderStats.get(folder.id) || { directFolders: 0, totalFolders: 0, directFiles: 0, totalFiles: 0 }}
               onPress={() => onFolderPress(folder.id)}
+              dropTargetFolderId={dropTargetFolderId}
+              hoverColor={hoverColor}
             />
           ))
         )}
       </ScrollView>
     </ThemedView>
+  );
+});
+
+// Wrapper component to create derived value for each folder
+const FolderCardWrapper = memo(function FolderCardWrapper({
+  folder,
+  stats,
+  onPress,
+  dropTargetFolderId,
+  hoverColor = '#f865c4',
+}: {
+  folder: Folder;
+  stats: FolderStats;
+  onPress: () => void;
+  dropTargetFolderId?: SharedValue<string | null>;
+  hoverColor?: string;
+}) {
+  const isDropTarget = useDerivedValue(() => {
+    return dropTargetFolderId?.value === folder.id;
+  });
+
+  return (
+    <FolderCard
+      folder={folder}
+      stats={stats}
+      onPress={onPress}
+      isDropTarget={isDropTarget}
+      hoverColor={hoverColor}
+    />
   );
 });
 
@@ -203,6 +267,10 @@ const styles = StyleSheet.create({
     borderRadius: 10,
     borderWidth: 1.5,
     borderColor: '#fbbf24',
+    marginRight: 12,
+  },
+  folderCardInner: {
+    flex: 1,
     padding: 10,
     justifyContent: 'space-between',
   },

@@ -51,6 +51,41 @@ export default function HomeScreen() {
   const canvasLayout = useSharedValue({ x: 0, y: 0, width: 0, height: 0 });
   const folderStripY = useSharedValue(0);
   const dropTargetFolderId = useSharedValue<string | null>(null);
+
+  // Zone Colors - matching ZoneBar component
+  const zoneColors = {
+    delete: '#ef4444',    // Red
+    temp: '#8b5cf6',      // Purple
+    duplicate: '#10b981', // Green
+    share: '#3b82f6',     // Blue
+  };
+
+  // Line/Selection Gradient Presets
+  const lineGradients = {
+    default: {
+      start: '#576ffb',           // Blue-purple (original)
+      end: '#f865c4',             // Pink (original)
+    },
+    delete: {
+      start: zoneColors.delete,   // Red
+      end: '#ffffff',             // White
+    },
+    temp: {
+      start: zoneColors.temp,     // Purple
+      end: '#ffffff',             // White
+    },
+    duplicate: {
+      start: zoneColors.duplicate, // Green
+      end: '#ffffff',             // White
+    },
+    share: {
+      start: zoneColors.share,    // Blue
+      end: '#ffffff',             // White
+    },
+  };
+
+  // Currently active gradient (can be changed based on context/zone)
+  const currentGradient = lineGradients.default;
   
   // Ref kept for potential future measurements/debug
   const canvasSectionRef = useRef<View>(null);
@@ -277,23 +312,28 @@ export default function HomeScreen() {
   };
 
 // Intersection Helper for folder
-  const checkFolderIntersection = (absX: number, absY: number, foldersList: typeof currentFolders): string | null => {
+  const checkFolderIntersection = (x: number, y: number, foldersList: typeof currentFolders): string | null => {
     'worklet';
-    const CARD_WIDTH = 100;
-    const GAP = 12;
-    const PADDING_LEFT = 16;
-    const OFFSET_TOP = 120;
-    const CARD_HEIGHT = 60;
+    const CARD_WIDTH = 120;  // Actual card width from FolderStrip styles
+    const GAP = 12;          // marginRight from folderCard style
+    const PADDING_LEFT = 16; // folderScroll paddingHorizontal
+    const HEADER_HEIGHT = 47; // folderHeader2 height (approx)
+    const CARD_HEIGHT = 76;   // Actual card height from FolderStrip styles
 
+    // folderStripY gives us the Y position of the FolderStrip container
     const stripY = folderStripY.value;
-    const minY = stripY + OFFSET_TOP;
+    
+    // Cards start after the header (with New button)
+    const minY = stripY + HEADER_HEIGHT;
     const maxY = minY + CARD_HEIGHT;
 
-    if (absY < minY || absY > maxY) {
+    // Check if Y is within folder strip bounds
+    if (y < minY || y > maxY) {
       return null;
     }
 
-    const xInStrip = absX - PADDING_LEFT;
+    // Calculate X position relative to scroll content
+    const xInStrip = x - PADDING_LEFT;
     const itemStride = CARD_WIDTH + GAP;
     
     const index = Math.floor(xInStrip / itemStride);
@@ -476,6 +516,8 @@ export default function HomeScreen() {
             folders={currentFolders}
             onFolderPress={handleFolderPress}
             onNewFolder={handleNewFolder}
+            dropTargetFolderId={dropTargetFolderId}
+            hoverColor={currentGradient.end}
           />
         </View>
 
@@ -516,6 +558,8 @@ export default function HomeScreen() {
           startY={startY}
           currentX={currentX}
           currentY={currentY}
+          gradientStart={currentGradient.start}
+          gradientEnd={currentGradient.end}
         />
 
         {/* New Folder Modal */}

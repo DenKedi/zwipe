@@ -14,6 +14,8 @@ interface DrawingLayerProps {
   currentY?: SharedValue<number>;
   color?: string;
   strokeWidth?: number;
+  gradientStart?: string;
+  gradientEnd?: string;
 }
 
 export function DrawingLayer({ 
@@ -23,7 +25,9 @@ export function DrawingLayer({
   currentX, 
   currentY,
   color = '#38bdf8', 
-  strokeWidth = 8 
+  strokeWidth = 8,
+  gradientStart = '#576ffb',
+  gradientEnd = '#f865c4',
 }: DrawingLayerProps) {
   const animatedPathProps = useAnimatedProps(() => {
     return {
@@ -59,8 +63,8 @@ export function DrawingLayer({
             x2="100%" 
             y2="100%"
           >
-            <Stop offset="0%" stopColor="#576ffb" stopOpacity="1" />
-            <Stop offset="100%" stopColor="#f865c4" stopOpacity="1" />
+            <Stop offset="0%" stopColor={gradientStart} stopOpacity="1" />
+            <Stop offset="100%" stopColor={gradientEnd} stopOpacity="1" />
           </LinearGradient>
         </Defs>
         
@@ -91,7 +95,7 @@ export function DrawingLayer({
         <AnimatedCircle
           animatedProps={animatedStartCircleProps}
           r="8"
-          fill="#576ffb"
+          fill={gradientStart}
           opacity="1"
         />
         
@@ -99,7 +103,7 @@ export function DrawingLayer({
         <AnimatedCircle
           animatedProps={animatedEndCircleProps}
           r="20"
-          fill="#f865c4"
+          fill={gradientEnd}
           opacity="0.2"
         />
       </Svg>
