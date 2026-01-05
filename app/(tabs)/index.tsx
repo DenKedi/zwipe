@@ -7,7 +7,7 @@ import { useFileSystem } from '@/hooks/useFileSystem';
 import { BreadcrumbSegment, FileSystemItem } from '@/types';
 import { generateRandomFiles } from '@/utils/fileSystemHelpers';
 import { memo, useCallback, useMemo, useRef, useState } from 'react';
-import { findNodeHandle, Modal, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, UIManager, View } from 'react-native';
+import { Modal, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import { runOnJS, useAnimatedReaction, useSharedValue } from 'react-native-reanimated';
 
@@ -48,21 +48,12 @@ export default function HomeScreen() {
 
   // Shared Value to hold live selection from UI thread
   const activeSelection = useSharedValue<string[]>([]);
-  const canvasOffset = useSharedValue({ x: 0, y: 0 });
+  const canvasLayout = useSharedValue({ x: 0, y: 0, width: 0, height: 0 });
   const folderStripY = useSharedValue(0);
   const dropTargetFolderId = useSharedValue<string | null>(null);
   
-  // Ref to measure canvas absolute position
+  // Ref kept for potential future measurements/debug
   const canvasSectionRef = useRef<View>(null);
-  
-  // Measure absolute position of canvas section
-  const measureCanvasOffset = useCallback(() => {
-    if (canvasSectionRef.current) {
-      canvasSectionRef.current.measureInWindow((x, y, width, height) => {
-        canvasOffset.value = { x: x || 0, y: y || 0 };
-      });
-    }
-  }, [canvasOffset]);
 
   // --- JS thread helpers
   const handleSelectionUpdate = (newIds: string[]) => {
@@ -188,9 +179,13 @@ export default function HomeScreen() {
   const pinchGesture = Gesture.Pinch()
     .runOnJS(true)
     .onStart((e) => {
-      const cx = dimensions.width / 2;
-      const cy = dimensions.height / 2;
-      
+      // Work in CANVAS-local coordinates (gesture events are local to the GestureDetector view)
+      const cx = canvasLayout.value.width / 2;
+      const cy = canvasLayout.value.height / 2;
+
+      const focalX = e.focalX - canvasLayout.value.x;
+      const focalY = e.focalY - canvasLayout.value.y;
+
       const startOffsetX = cx * (1 - savedScale.value) + savedTranslateX.value;
       const startOffsetY = cy * (1 - savedScale.value) + savedTranslateY.value;
 
@@ -198,21 +193,24 @@ export default function HomeScreen() {
         scale: savedScale.value,
         translateX: savedTranslateX.value,
         translateY: savedTranslateY.value,
-        focalX: e.focalX,
-        focalY: e.focalY,
+        focalX,
+        focalY,
         offsetX: startOffsetX,
         offsetY: startOffsetY,
       };
     })
     .onUpdate((e) => {
-      const cx = dimensions.width / 2;
-      const cy = dimensions.height / 2;
+      const cx = canvasLayout.value.width / 2;
+      const cy = canvasLayout.value.height / 2;
+
+      const focalX = e.focalX - canvasLayout.value.x;
+      const focalY = e.focalY - canvasLayout.value.y;
       const newScale = pinchStartValues.current.scale * e.scale;
       
       scale.value = newScale;
 
-      const newOffsetX = e.focalX - (pinchStartValues.current.focalX - pinchStartValues.current.offsetX) * e.scale;
-      const newOffsetY = e.focalY - (pinchStartValues.current.focalY - pinchStartValues.current.offsetY) * e.scale;
+      const newOffsetX = focalX - (pinchStartValues.current.focalX - pinchStartValues.current.offsetX) * e.scale;
+      const newOffsetY = focalY - (pinchStartValues.current.focalY - pinchStartValues.current.offsetY) * e.scale;
 
       translateX.value = newOffsetX - cx * (1 - newScale);
       translateY.value = newOffsetY - cy * (1 - newScale);
@@ -225,21 +223,32 @@ export default function HomeScreen() {
 
 // Intersection Helper for files
   const calculateIntersectedIds = (
-    absX: number,
-    absY: number,
+    x: number,
+    y: number,
     visibleFiles: FileSystemItem[],
     currentScale: number,
     transX: number,
     transY: number,
     offX: number,
-    offY: number
+    offY: number,
+    canvasW: number,
+    canvasH: number
   ): string[] => {
     'worklet'; 
-    // Transform in FileCanvas: translateX -> translateY -> scale (applied in order)
-    // This means: screenPos = (canvasPos + translate) * scale + canvasOffset
-    // Solving for canvasPos: canvasPos = (screenPos - canvasOffset) / scale - translate
-    const canvasX = (absX - offX) / currentScale - transX;
-    const canvasY = (absY - offY) / currentScale - transY;
+    // Gesture event x/y are relative to the GestureDetector root.
+    // Canvas is offset within that root by (offX, offY). Convert to CANVAS-local coords first.
+    const localX = x - offX;
+    const localY = y - offY;
+
+    // React Native scales around the view center by default.
+    // With scale around center c and translation t:
+    // screenLocal = canvasLocal * s + c * (1 - s) + t
+    // => canvasLocal = (screenLocal - t - c * (1 - s)) / s
+    const cx = canvasW / 2;
+    const cy = canvasH / 2;
+
+    const canvasX = (localX - transX - (1 - currentScale) * cx) / currentScale;
+    const canvasY = (localY - transY - (1 - currentScale) * cy) / currentScale;
 
     const selectionArea = {
       minX: canvasX - 5,
@@ -250,12 +259,16 @@ export default function HomeScreen() {
 
     const intersectedIds: string[] = [];
 
+    // Make hitboxes 5% larger than the visual file size (symmetric padding)
+    const hitboxPadX = (FILE_WIDTH * 0.05) / 2;
+    const hitboxPadY = (FILE_HEIGHT * 0.05) / 2;
+
     for (const file of visibleFiles) {
       if (
-        selectionArea.maxX > file.x &&
-        selectionArea.minX < file.x + FILE_WIDTH &&
-        selectionArea.maxY > file.y &&
-        selectionArea.minY < file.y + FILE_HEIGHT
+        selectionArea.maxX > file.x - hitboxPadX &&
+        selectionArea.minX < file.x + FILE_WIDTH + hitboxPadX &&
+        selectionArea.maxY > file.y - hitboxPadY &&
+        selectionArea.minY < file.y + FILE_HEIGHT + hitboxPadY
       ) {
         intersectedIds.push(file.id);
       }
@@ -303,32 +316,41 @@ export default function HomeScreen() {
       runOnJS(handleResetSelection)(); 
       activeSelection.value = []; 
       isDrawing.value = true;
-      pointsX.value = [e.absoluteX];
-      pointsY.value = [e.absoluteY];
-      startX.value = e.absoluteX;
-      startY.value = e.absoluteY;
-      currentX.value = e.absoluteX;
-      currentY.value = e.absoluteY;
-      path.value = `M ${e.absoluteX} ${e.absoluteY}`;
+      pointsX.value = [e.x];
+      pointsY.value = [e.y];
+      startX.value = e.x;
+      startY.value = e.y;
+      currentX.value = e.x;
+      currentY.value = e.y;
+      path.value = `M ${e.x} ${e.y}`;
     })
     .onUpdate((e) => {
       'worklet';
       if (isDrawing.value) {
-        currentX.value = e.absoluteX;
-        currentY.value = e.absoluteY;
+        currentX.value = e.x;
+        currentY.value = e.y;
 
         //Debug log
         //console.log("X: ", Math.floor(currentX.value), " Y: ", Math.floor(currentY.value));
 
         // Calculate intersections and udate SharedValue 
         const ids = calculateIntersectedIds(
-          e.absoluteX, e.absoluteY, visibleFiles, scale.value, translateX.value, translateY.value, canvasOffset.value.x, canvasOffset.value.y
+          e.x,
+          e.y,
+          visibleFiles,
+          scale.value,
+          translateX.value,
+          translateY.value,
+          canvasLayout.value.x,
+          canvasLayout.value.y,
+          canvasLayout.value.width,
+          canvasLayout.value.height
         );
         activeSelection.value = ids;
         
         // Add new point
-        const newPointsX = [...pointsX.value, e.absoluteX];
-        const newPointsY = [...pointsY.value, e.absoluteY];
+        const newPointsX = [...pointsX.value, e.x];
+        const newPointsY = [...pointsY.value, e.y];
         pointsX.value = newPointsX;
         pointsY.value = newPointsY;
         
@@ -354,7 +376,7 @@ export default function HomeScreen() {
           path.value = pathStr;
         }
 
-        const folderId = checkFolderIntersection(e.absoluteX, e.absoluteY, currentFolders);
+        const folderId = checkFolderIntersection(e.x, e.y, currentFolders);
         if (folderId) {
           dropTargetFolderId.value = folderId;
         }
@@ -394,14 +416,16 @@ export default function HomeScreen() {
       'worklet';
       // Wir nutzen deine existierende Funktion, um zu prüfen, ob wir etwas treffen
       const ids = calculateIntersectedIds(
-        e.absoluteX,
-        e.absoluteY,
+        e.x,
+        e.y,
         visibleFiles,
         scale.value,
         translateX.value,
         translateY.value,
-        canvasOffset.value.x, // Offset X
-        canvasOffset.value.y  // Offset Y
+        canvasLayout.value.x, // Canvas offset X (relative to GestureDetector)
+        canvasLayout.value.y,  // Canvas offset Y (relative to GestureDetector)
+        canvasLayout.value.width,
+        canvasLayout.value.height
       );
 
       // Wenn die Liste leer ist, haben wir ins Leere geklickt
@@ -464,9 +488,10 @@ export default function HomeScreen() {
         <View 
           ref={canvasSectionRef}
           style={styles.canvasSection}
-          onLayout={() => {
-            // Use measureInWindow for absolute screen coordinates
-            measureCanvasOffset();
+          onLayout={(e) => {
+            // Layout coords are relative to the GestureDetector root => same space as gesture event e.x/e.y
+            const { x, y, width, height } = e.nativeEvent.layout;
+            canvasLayout.value = { x, y, width, height };
           }}
         >
           <View style={styles.canvasHeader}>
