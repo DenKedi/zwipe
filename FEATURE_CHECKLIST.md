@@ -113,8 +113,9 @@
 | Feature | Status | Notes |
 |---------|--------|-------|
 | Action stack tracking | ❌ | No action history implementation |
-| Undo (Ctrl+Z) | ❌ | Not implemented |
-| Redo (Ctrl+Shift+Z) | ❌ | Not implemented |
+| Undo Button | ❌ | Not implemented |
+| Redo  Button | ❌ | Not implemented |
+| Clear  Button | ❌ | Not implemented |
 
 ---
 
