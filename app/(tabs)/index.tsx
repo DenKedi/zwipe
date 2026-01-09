@@ -270,39 +270,24 @@ export default function HomeScreen() {
     let filencount = selectedFileIds.length;
 
     if (filencount > 0) {
-      Alert.alert(
-        "Delete",
-        "Do you really want to delete " + filencount + " files?",
-        [
-          {
-            text: "Cancel",
-            style: "cancel"
-          },
-          {
-            text: "Delete",
-            onPress: () => {
-              // Track files and their previous locations for undo
-              const filesToDelete = files.filter(f => selectedFileIds.includes(f.id));
-              const moveInfos: FileMoveInfo[] = filesToDelete.map(file => ({
-                fileId: file.id,
-                previousParentId: file.parentId || null,
-                newParentId: 'trash',
-              }));
-              
-              // Execute the delete (move to trash)
-              moveFilesToFolder(selectedFileIds, 'trash');
-              console.log("deleted " + filencount + " files")
-              
-              // Create action for undo/redo
-              const action = createDeleteFilesAction(moveInfos);
-              execute(action);
-              
-              // Clear selection after delete
-              clearSelection();
-            }
-          }
-        ]
-      );
+      // Track files and their previous locations for undo
+      const filesToDelete = files.filter(f => selectedFileIds.includes(f.id));
+      const moveInfos: FileMoveInfo[] = filesToDelete.map(file => ({
+        fileId: file.id,
+        previousParentId: file.parentId || null,
+        newParentId: 'trash',
+      }));
+      
+      // Execute the delete (move to trash)
+      moveFilesToFolder(selectedFileIds, 'trash');
+      console.log("deleted " + filencount + " files")
+      
+      // Create action for undo/redo
+      const action = createDeleteFilesAction(moveInfos);
+      execute(action);
+      
+      // Clear selection after delete
+      clearSelection();
     }
   }, [selectedFileIds, files, moveFilesToFolder, clearSelection, execute]);
 
