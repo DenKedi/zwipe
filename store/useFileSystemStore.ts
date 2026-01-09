@@ -96,7 +96,7 @@ export const useFileSystemStore = create<FileSystemState>((set, get) => ({
     // Reomve folder and its files
     set(state => ({
       folders: state.folders.filter(f => f.id !== folderId),
-      files: state.files.filter(f => f.parentId !== folderId)
+      files: state.files.filter(f => f.parentId !== folderId),
     })),
 
   updateFolder: (folderId, updates) =>

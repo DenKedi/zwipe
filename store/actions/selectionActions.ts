@@ -9,15 +9,17 @@ export function createSelectFilesAction(
   return {
     type: ActionType.SELECT_FILES,
     description: `Selected ${addedIds.length} file(s)`,
-    
+
     undo: () => {
       // Restore previous selection
       useSelectionStore.getState().setSelectedIds(previousSelection);
     },
-    
+
     redo: () => {
       // Re-apply the selection (previous + added)
-      useSelectionStore.getState().setSelectedIds([...previousSelection, ...addedIds]);
+      useSelectionStore
+        .getState()
+        .setSelectedIds([...previousSelection, ...addedIds]);
     },
   };
 }
@@ -30,15 +32,17 @@ export function createDeselectFilesAction(
   return {
     type: ActionType.DESELECT_FILES,
     description: `Deselected ${removedIds.length} file(s)`,
-    
+
     undo: () => {
       // Restore previous selection
       useSelectionStore.getState().setSelectedIds(previousSelection);
     },
-    
+
     redo: () => {
       // Remove the IDs again
-      const newSelection = previousSelection.filter(id => !removedIds.includes(id));
+      const newSelection = previousSelection.filter(
+        id => !removedIds.includes(id)
+      );
       useSelectionStore.getState().setSelectedIds(newSelection);
     },
   };
@@ -53,20 +57,22 @@ export function createToggleSelectionAction(
   return {
     type: wasSelected ? ActionType.DESELECT_FILES : ActionType.SELECT_FILES,
     description: wasSelected ? `Deselected file` : `Selected file`,
-    
+
     undo: () => {
       useSelectionStore.getState().setSelectedIds(previousSelection);
     },
-    
+
     redo: () => {
       if (wasSelected) {
         // Was selected, so redo means deselect
-        useSelectionStore.getState().setSelectedIds(
-          previousSelection.filter(id => id !== fileId)
-        );
+        useSelectionStore
+          .getState()
+          .setSelectedIds(previousSelection.filter(id => id !== fileId));
       } else {
         // Was not selected, so redo means select
-        useSelectionStore.getState().setSelectedIds([...previousSelection, fileId]);
+        useSelectionStore
+          .getState()
+          .setSelectedIds([...previousSelection, fileId]);
       }
     },
   };

@@ -8,8 +8,10 @@ export function createMoveFilesAction(
 ): Action {
   return {
     type: ActionType.MOVE_FILES,
-    description: `Moved ${moveInfos.length} file(s) to ${targetFolderId ? 'folder' : 'root'}`,
-    
+    description: `Moved ${moveInfos.length} file(s) to ${
+      targetFolderId ? 'folder' : 'root'
+    }`,
+
     undo: () => {
       // Restore each file to its previous parent
       const fileSystemStore = useFileSystemStore.getState();
@@ -17,7 +19,7 @@ export function createMoveFilesAction(
         fileSystemStore.moveFilesToFolder([info.fileId], info.previousParentId);
       });
     },
-    
+
     redo: () => {
       // Re-apply the move to target folder
       const fileSystemStore = useFileSystemStore.getState();
@@ -28,13 +30,11 @@ export function createMoveFilesAction(
 }
 
 // Action for deleting files (moving to trash)
-export function createDeleteFilesAction(
-  moveInfos: FileMoveInfo[]
-): Action {
+export function createDeleteFilesAction(moveInfos: FileMoveInfo[]): Action {
   return {
     type: ActionType.DELETE_FILES,
     description: `Deleted ${moveInfos.length} file(s)`,
-    
+
     undo: () => {
       // Restore files from trash to their previous locations
       const fileSystemStore = useFileSystemStore.getState();
@@ -42,7 +42,7 @@ export function createDeleteFilesAction(
         fileSystemStore.moveFilesToFolder([info.fileId], info.previousParentId);
       });
     },
-    
+
     redo: () => {
       // Move files back to trash
       const fileSystemStore = useFileSystemStore.getState();

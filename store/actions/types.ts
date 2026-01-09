@@ -2,13 +2,13 @@
 export interface Action {
   // Unique type identifier for the action
   type: string;
-  
+
   // Human-readable description for debugging/UI
   description: string;
-  
+
   // Undo the action (restore previous state)
   undo: () => void;
-  
+
   // Redo the action (re-apply the action)
   redo: () => void;
 }
