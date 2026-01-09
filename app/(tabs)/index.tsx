@@ -4,8 +4,11 @@ import { FolderStrip } from '@/components/FolderStrip';
 import { ThemedView } from '@/components/themed-view';
 import { ZoneBar, zones } from '@/components/ZoneBar';
 import { useFileSystem } from '@/hooks/useFileSystem';
+import { useActionHistoryStore, createSelectFilesAction, createToggleSelectionAction, createMoveFilesAction, createDeleteFilesAction, FileMoveInfo } from '@/store/actions';
+import { useSelectionStore } from '@/store/useSelectionStore';
 import { BreadcrumbSegment, FileSystemItem, ZoneType } from '@/types';
 import { generateRandomFiles } from '@/utils/fileSystemHelpers';
+import { Undo2, Redo2, Eraser } from 'lucide-react-native';
 import { useCallback, useMemo, useRef, useState } from 'react';
 import { Alert, Modal, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
@@ -21,8 +24,24 @@ export default function HomeScreen() {
     { id: 'home', name: 'Home' }
   ]);
 
-  // Selection State
-  const [selectedFileIds, setSelectedFileIds] = useState<string[]>([]);
+  // Action History for undo/redo
+  const { execute, undo, redo, canUndo, canRedo } = useActionHistoryStore();
+  
+  // Selection State (simple store, no history logic here)
+  const { 
+    selectedIds,
+    pendingIds,
+    addToPending,
+    commitPending,
+    clearSelection,
+    setSelectedIds,
+  } = useSelectionStore();
+  
+  // Combined selection for display (committed + pending during draw)
+  const selectedFileIds = useMemo(() => 
+    [...selectedIds, ...pendingIds],
+    [selectedIds, pendingIds]
+  );
   
   // Folder creation modal
   const [showNewFolderModal, setShowNewFolderModal] = useState(false);
@@ -107,15 +126,20 @@ export default function HomeScreen() {
 
   // --- JS thread helpers
   const handleSelectionUpdate = (newIds: string[]) => {
-    setSelectedFileIds(prev => {
-      const newSet = new Set(prev);
-      newIds.forEach(id => newSet.add(id));
-      return Array.from(newSet);
-    });
+    // Update pending selection during drawing (no history yet)
+    addToPending(newIds);
   };
-
-  const handleResetSelection = () => {
-    setSelectedFileIds([]);
+  
+  const handleCommitSelection = () => {
+    // Get current state before committing
+    const previousSelection = [...selectedIds];
+    const addedIds = commitPending();
+    
+    // Only create action if something was actually added
+    if (addedIds.length > 0) {
+      const action = createSelectFilesAction(addedIds, previousSelection);
+      execute(action);
+    }
   };
 
   const handleGradientUpdate = (startColor: string, endColor: string) => {
@@ -203,27 +227,43 @@ export default function HomeScreen() {
 
   // Toggle file selection
   const handleFileSelect = useCallback((fileId: string) => {
-    setSelectedFileIds(prev => {
-      if (prev.includes(fileId)) {
-        return prev.filter(id => id !== fileId);
-      } else {
-        return [...prev, fileId];
-      }
-    });
-  }, []);
-
-  // Clear selection when clicking on empty background
-  const handleBackgroundClick = useCallback(() => {
-    setSelectedFileIds([]); 
-  }, []);
-
-  // Handle dropping files in folder 
+    const previousSelection = [...selectedIds];
+    const isCurrentlySelected = selectedIds.includes(fileId);
+    
+    if (isCurrentlySelected) {
+      // Deselect
+      setSelectedIds(selectedIds.filter(id => id !== fileId));
+    } else {
+      // Select
+      setSelectedIds([...selectedIds, fileId]);
+    }
+    
+    // Create action for undo/redo
+    const action = createToggleSelectionAction(fileId, isCurrentlySelected, previousSelection);
+    execute(action);
+  }, [selectedIds, setSelectedIds, execute]);
+  
   const handleDropAction = useCallback((targetId: string) => {
     const filesToMove = files.filter(f => selectedFileIds.includes(f.id));
     console.log(`Moving ${filesToMove.length} files to folder ${targetId}`, filesToMove);
+    
+    // Track previous parent IDs for undo
+    const moveInfos: FileMoveInfo[] = filesToMove.map(file => ({
+      fileId: file.id,
+      previousParentId: file.parentId || null,
+      newParentId: targetId,
+    }));
+    
+    // Execute the move
     moveFilesToFolder(selectedFileIds, targetId);
-    setSelectedFileIds([]);
-  }, [files, selectedFileIds, moveFilesToFolder]);
+    
+    // Create action for undo/redo
+    const action = createMoveFilesAction(moveInfos, targetId);
+    execute(action);
+    
+    // Clear selection after move
+    clearSelection();
+  }, [files, selectedFileIds, moveFilesToFolder, clearSelection, execute]);
 
   // handle deleting selected files
   const handleDeleteAction = useCallback(() => {
@@ -241,15 +281,30 @@ export default function HomeScreen() {
           {
             text: "Delete",
             onPress: () => {
+              // Track files and their previous locations for undo
+              const filesToDelete = files.filter(f => selectedFileIds.includes(f.id));
+              const moveInfos: FileMoveInfo[] = filesToDelete.map(file => ({
+                fileId: file.id,
+                previousParentId: file.parentId || null,
+                newParentId: 'trash',
+              }));
+              
+              // Execute the delete (move to trash)
               moveFilesToFolder(selectedFileIds, 'trash');
               console.log("deleted " + filencount + " files")
-              setSelectedFileIds([]);
+              
+              // Create action for undo/redo
+              const action = createDeleteFilesAction(moveInfos);
+              execute(action);
+              
+              // Clear selection after delete
+              clearSelection();
             }
           }
         ]
       );
     }
-  }, [selectedFileIds, moveFilesToFolder]);
+  }, [selectedFileIds, files, moveFilesToFolder, clearSelection, execute]);
 
   // handle delete folder
   const handleDeleteFolder = useCallback((folderId: string) => {
@@ -469,7 +524,7 @@ export default function HomeScreen() {
         dragY.value = e.y;
       } else {
         isDrawing.value = true;
-        runOnJS(handleResetSelection)(); 
+        // Don't reset selection - multiple draws will add to selection
         runOnJS(handleResetGradient)();
         activeSelection.value = []; 
         pointsX.value = [e.x];
@@ -579,6 +634,15 @@ export default function HomeScreen() {
         }
       } 
       else if (isDrawing.value) {
+        // Check if we're performing an action that will clear selection
+        const willPerformAction = currentZone === 'trash' || targetFolderId !== null;
+        
+        // Only commit selection if NOT performing an action
+        // (actions clear selection themselves)
+        if (!willPerformAction) {
+          runOnJS(handleCommitSelection)();
+        }
+        
         if (currentZone === 'trash') {
           runOnJS(handleDeleteAction)();
         } else if (targetFolderId) {
@@ -610,32 +674,7 @@ export default function HomeScreen() {
   // Simultaneous allows both. If I use 2 fingers, Pan might also trigger if I don't limit it.
   // I limited Pan to maxPointers(1).
 
-  // Tap Gesture to clear selection
-  const tapGesture = Gesture.Tap()
-    .onEnd((e) => {
-      'worklet';
-      // Wir nutzen deine existierende Funktion, um zu prüfen, ob wir etwas treffen
-      const ids = calculateIntersectedIds(
-        e.x,
-        e.y,
-        visibleFiles,
-        scale.value,
-        translateX.value,
-        translateY.value,
-        canvasLayout.value.x, // Canvas offset X (relative to GestureDetector)
-        canvasLayout.value.y,  // Canvas offset Y (relative to GestureDetector)
-        canvasLayout.value.width,
-        canvasLayout.value.height
-      );
-
-      // Wenn die Liste leer ist, haben wir ins Leere geklickt
-      if (ids.length === 0) {
-        runOnJS(handleBackgroundClick)();
-      }
-    });
-
-
-  const composedGesture = Gesture.Simultaneous(pinchGesture, panGesture, tapGesture);
+  const composedGesture = Gesture.Simultaneous(pinchGesture, panGesture);
 
   return (
     <GestureDetector gesture={composedGesture}>
@@ -733,6 +772,79 @@ export default function HomeScreen() {
           gradientStart={gradientStartColor}
           gradientEnd={gradientEndColor}
         />
+
+        {/* Selection Counter */}
+        {selectedFileIds.length > 0 && (
+          <View style={styles.selectionCounterContainer}>
+            <View style={styles.selectionCounter}>
+              <Text style={styles.selectionCounterText}>
+                {selectedFileIds.length} {selectedFileIds.length === 1 ? 'file' : 'files'} selected
+              </Text>
+            </View>
+          </View>
+        )}
+
+        {/* Action Buttons (Bottom) */}
+        <View style={styles.actionButtonsContainer}>
+          <TouchableOpacity 
+            style={[
+              styles.actionButton,
+              !canUndo && styles.actionButtonDisabled
+            ]} 
+            onPress={undo}
+            disabled={!canUndo}
+          >
+            <Undo2 
+              size={20} 
+              color={canUndo ? '#f1f5f9' : '#475569'} 
+              strokeWidth={2.5}
+            />
+            <Text style={[
+              styles.actionButtonText,
+              !canUndo && styles.actionButtonTextDisabled
+            ]}>Undo</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity 
+            style={[
+              styles.actionButton,
+              !canRedo && styles.actionButtonDisabled
+            ]} 
+            onPress={redo}
+            disabled={!canRedo}
+          >
+            <Redo2 
+              size={20} 
+              color={canRedo ? '#f1f5f9' : '#475569'} 
+              strokeWidth={2.5}
+            />
+            <Text style={[
+              styles.actionButtonText,
+              !canRedo && styles.actionButtonTextDisabled
+            ]}>Redo</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity 
+            style={[
+              styles.actionButton,
+              styles.clearButton,
+              selectedFileIds.length === 0 && styles.actionButtonDisabled
+            ]} 
+            onPress={clearSelection}
+            disabled={selectedFileIds.length === 0}
+          >
+            <Eraser 
+              size={20} 
+              color={selectedFileIds.length > 0 ? '#fef2f2' : '#475569'} 
+              strokeWidth={2.5}
+            />
+            <Text style={[
+              styles.actionButtonText,
+              styles.clearButtonText,
+              selectedFileIds.length === 0 && styles.actionButtonTextDisabled
+            ]}>Clear</Text>
+          </TouchableOpacity>
+        </View>
 
         {/* New Folder Modal */}
         <Modal
@@ -892,5 +1004,79 @@ const styles = StyleSheet.create({
     color: '#ffffff',
     fontSize: 16,
     fontWeight: '600',
+  },
+  selectionCounterContainer: {
+    position: 'absolute',
+    bottom: 90,
+    left: 0,
+    right: 0,
+    flexDirection: 'row',
+    justifyContent: 'center',
+    pointerEvents: 'none',
+  },
+  selectionCounter: {
+    backgroundColor: 'rgba(59, 130, 246, 0.95)',
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: 'rgba(147, 197, 253, 0.3)',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.25,
+    shadowRadius: 3,
+    elevation: 4,
+  },
+  selectionCounterText: {
+    color: '#ffffff',
+    fontSize: 13,
+    fontWeight: '600',
+  },
+  actionButtonsContainer: {
+    position: 'absolute',
+    bottom: 20,
+    left: 0,
+    right: 0,
+    flexDirection: 'row',
+    justifyContent: 'center',
+    alignItems: 'center',
+    gap: 12,
+    paddingHorizontal: 20,
+    pointerEvents: 'box-none',
+  },
+  actionButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    backgroundColor: 'rgba(30, 41, 59, 0.95)',
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(148, 163, 184, 0.2)',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.3,
+    shadowRadius: 4,
+    elevation: 5,
+  },
+  actionButtonDisabled: {
+    backgroundColor: 'rgba(30, 41, 59, 0.5)',
+    borderColor: 'rgba(71, 85, 105, 0.3)',
+  },
+  actionButtonText: {
+    color: '#f1f5f9',
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  actionButtonTextDisabled: {
+    color: '#475569',
+  },
+  clearButton: {
+    backgroundColor: 'rgba(239, 68, 68, 0.9)',
+    borderColor: 'rgba(239, 68, 68, 0.3)',
+  },
+  clearButtonText: {
+    color: '#fef2f2',
   },
 });
