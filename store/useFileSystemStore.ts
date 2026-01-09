@@ -1,5 +1,5 @@
-import { create } from 'zustand';
 import { FileSystemItem, Folder } from '@/types';
+import { create } from 'zustand';
 
 interface FileSystemState {
   files: FileSystemItem[];
@@ -93,16 +93,11 @@ export const useFileSystemStore = create<FileSystemState>((set, get) => ({
     })),
 
   removeFolder: folderId =>
-    set(state => {
-      // Remove folder and move its files to parent
-      const folder = state.folders.find(f => f.id === folderId);
-      return {
-        folders: state.folders.filter(f => f.id !== folderId),
-        files: state.files.map(f =>
-          f.parentId === folderId ? { ...f, parentId: folder?.parentId } : f
-        ),
-      };
-    }),
+    // Reomve folder and its files
+    set(state => ({
+      folders: state.folders.filter(f => f.id !== folderId),
+      files: state.files.filter(f => f.parentId !== folderId)
+    })),
 
   updateFolder: (folderId, updates) =>
     set(state => ({

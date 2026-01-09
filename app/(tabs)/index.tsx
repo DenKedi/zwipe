@@ -7,13 +7,13 @@ import { useFileSystem } from '@/hooks/useFileSystem';
 import { BreadcrumbSegment, FileSystemItem, ZoneType } from '@/types';
 import { generateRandomFiles } from '@/utils/fileSystemHelpers';
 import { useCallback, useMemo, useRef, useState } from 'react';
-import { Modal, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { Alert, Modal, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
-import { runOnJS, useAnimatedReaction, useSharedValue } from 'react-native-reanimated';
+import Animated, { runOnJS, useAnimatedReaction, useAnimatedStyle, useSharedValue } from 'react-native-reanimated';
 
 export default function HomeScreen() {
   const [dimensions, setDimensions] = useState({ width: 0, height: 0 });
-  const { files, folders, createFolder, createFile, moveFilesToFolder } = useFileSystem();
+  const { files, folders, createFolder, createFile, moveFilesToFolder, deleteFolder } = useFileSystem();
   
   // Navigation State
   const [currentFolderId, setCurrentFolderId] = useState<string | null>(null);
@@ -51,6 +51,33 @@ export default function HomeScreen() {
   const canvasLayout = useSharedValue({ x: 0, y: 0, width: 0, height: 0 });
   const folderStripY = useSharedValue(0);
   const dropTargetFolderId = useSharedValue<string | null>(null);
+
+  // Folder State
+  const draggingFolderId = useSharedValue<string | null>(null);
+  const dragX = useSharedValue(0);
+  const dragY = useSharedValue(0);
+
+  const ghostStyle = useAnimatedStyle(() => {
+    return {
+      position: 'absolute',
+      width: 40,
+      height: 40,
+      backgroundColor: 'rgba(255, 255, 255, 0.3)',
+      borderRadius: 15,
+      borderWidth: 2,
+      borderColor: 'white',
+      justifyContent: 'center',
+      alignItems: 'center',
+      pointerEvents: 'none',
+      zIndex: 1000,
+      transform: [
+        { translateX: dragX.value - 40 },
+        { translateY: dragY.value - 40 },
+        { scale: draggingFolderId.value ? 1.1 : 0 }
+      ],
+      opacity: draggingFolderId.value ? 1 : 0,
+    };
+  });
 
   // Zone Colors - matching ZoneBar component
   const zoneColors: Record<ZoneType, string> = {
@@ -197,6 +224,57 @@ export default function HomeScreen() {
     moveFilesToFolder(selectedFileIds, targetId);
     setSelectedFileIds([]);
   }, [files, selectedFileIds, moveFilesToFolder]);
+
+  // handle deleting selected files
+  const handleDeleteAction = useCallback(() => {
+    let filencount = selectedFileIds.length;
+
+    if (filencount > 0) {
+      Alert.alert(
+        "Delete",
+        "Do you really want to delete " + filencount + " files?",
+        [
+          {
+            text: "Cancel",
+            style: "cancel"
+          },
+          {
+            text: "Delete",
+            onPress: () => {
+              moveFilesToFolder(selectedFileIds, 'trash');
+              console.log("deleted " + filencount + " files")
+              setSelectedFileIds([]);
+            }
+          }
+        ]
+      );
+    }
+  }, [selectedFileIds, moveFilesToFolder]);
+
+  // handle delete folder
+  const handleDeleteFolder = useCallback((folderId: string) => {
+    Alert.alert(
+      "Delete Folder",
+      "Do you really want to delete this folder and everything inside?",
+      [
+        { text: "Cancel", style: "cancel" },
+        { 
+          text: "Delete", 
+          style: "destructive", 
+          onPress: () => {
+            console.log("Deleted folder: " + folderId);
+              deleteFolder(folderId);
+          } 
+        }
+      ]
+    );
+  }, [deleteFolder]);
+
+  // Move Folder via longpress
+  const handleFolderLongPress = useCallback((id: string) => {
+    draggingFolderId.value = id;
+    isDrawing.value = false;
+  }, []);
 
   // Gestures
   const pinchStartValues = useRef({
@@ -382,21 +460,31 @@ export default function HomeScreen() {
     .maxPointers(1)
     .onStart((e) => {
       'worklet';
-      runOnJS(handleResetSelection)(); 
-      runOnJS(handleResetGradient)();
-      activeSelection.value = []; 
-      isDrawing.value = true;
-      pointsX.value = [e.x];
-      pointsY.value = [e.y];
-      startX.value = e.x;
-      startY.value = e.y;
-      currentX.value = e.x;
-      currentY.value = e.y;
-      path.value = `M ${e.x} ${e.y}`;
+      dragX.value = e.x;
+      dragY.value = e.y;
+      // long press check
+      if (draggingFolderId.value) {
+        isDrawing.value = false;
+        dragX.value = e.x;
+        dragY.value = e.y;
+      } else {
+        isDrawing.value = true;
+        runOnJS(handleResetSelection)(); 
+        runOnJS(handleResetGradient)();
+        activeSelection.value = []; 
+        pointsX.value = [e.x];
+        pointsY.value = [e.y];
+        startX.value = e.x;
+        startY.value = e.y;
+        currentX.value = e.x;
+        currentY.value = e.y;
+        path.value = `M ${e.x} ${e.y}`;
+      }
       hoveredZoneType.value = null;
     })
     .onUpdate((e) => {
       'worklet';
+
       if (isDrawing.value) {
         currentX.value = e.x;
         currentY.value = e.y;
@@ -418,32 +506,30 @@ export default function HomeScreen() {
           canvasLayout.value.height
         );
         activeSelection.value = ids;
-        
-        // Add new point
+
+        // Add new point        
         const newPointsX = [...pointsX.value, e.x];
         const newPointsY = [...pointsY.value, e.y];
         pointsX.value = newPointsX;
         pointsY.value = newPointsY;
         
-        // Generate smooth path
+        // Generate smooth path        
         if (newPointsX.length === 1) {
           path.value = `M ${newPointsX[0]} ${newPointsY[0]}`;
         } else {
           let pathStr = `M ${newPointsX[0]} ${newPointsY[0]}`;
-          
           for (let i = 1; i < newPointsX.length - 1; i++) {
             const xc = (newPointsX[i] + newPointsX[i + 1]) / 2;
             const yc = (newPointsY[i] + newPointsY[i + 1]) / 2;
             pathStr += ` Q ${newPointsX[i]} ${newPointsY[i]} ${xc} ${yc}`;
           }
-          
+
           // Last point
           if (newPointsX.length > 1) {
             const lastIdx = newPointsX.length - 1;
             const prevIdx = newPointsX.length - 2;
             pathStr += ` Q ${newPointsX[prevIdx]} ${newPointsY[prevIdx]} ${newPointsX[lastIdx]} ${newPointsY[lastIdx]}`;
           }
-          
           path.value = pathStr;
         }
 
@@ -455,7 +541,7 @@ export default function HomeScreen() {
           runOnJS(handleResetGradient)();
         } else {
           dropTargetFolderId.value = null;
-          
+
           // Check zone intersection
           const zoneType = checkZoneIntersection(e.x, e.y);
           if (zoneType && zoneType !== hoveredZoneType.value) {
@@ -471,20 +557,41 @@ export default function HomeScreen() {
             }
           }
         }
+      } 
+      // folder drag
+      else if (draggingFolderId.value) {
+        dragX.value = e.x;
+        dragY.value = e.y;
+        hoveredZoneType.value = checkZoneIntersection(e.x, e.y);
       }
     })
     .onEnd(() => {
       'worklet';
-      console.log(dropTargetFolderId.value);
-      isDrawing.value = false;
+      
+      const currentZone = hoveredZoneType.value;
+      const folderIdToTrash = draggingFolderId.value;
+      const targetFolderId = dropTargetFolderId.value;
 
-      const targetId = dropTargetFolderId.value;
-      if (targetId) {
-        runOnJS(handleDropAction)(targetId);
+      // delete folder
+      if (folderIdToTrash) {
+        if (currentZone === 'trash') {
+          runOnJS(handleDeleteFolder)(folderIdToTrash);
+        }
+      } 
+      else if (isDrawing.value) {
+        if (currentZone === 'trash') {
+          runOnJS(handleDeleteAction)();
+        } else if (targetFolderId) {
+          runOnJS(handleDropAction)(targetFolderId);
+        }
       }
+
+      // reset everything
+      isDrawing.value = false;
+      draggingFolderId.value = null;
       dropTargetFolderId.value = null;
       hoveredZoneType.value = null;
-      
+
       // Reset gradient colors
       runOnJS(handleResetGradient)();
       
@@ -496,8 +603,6 @@ export default function HomeScreen() {
       startY.value = 0;
       currentX.value = 0;
       currentY.value = 0;
-      
-      // TODO: Fix coordinate transformation while zoomed out
     });
 
   // Combine gestures: Pinch (2 fingers) and Pan (1 finger) can run simultaneously
@@ -571,6 +676,7 @@ export default function HomeScreen() {
             folders={currentFolders}
             onFolderPress={handleFolderPress}
             onNewFolder={handleNewFolder}
+            onFolderLongPress={handleFolderLongPress}
             dropTargetFolderId={dropTargetFolderId}
             hoverColor={gradientEndColor}
           />
@@ -611,6 +717,11 @@ export default function HomeScreen() {
             onFileSelect={handleFileSelect}
           />
         </View>
+
+        {/* Folder Ghost view) */}
+        <Animated.View style={ghostStyle}>
+          <Text style={{ fontSize: 20 }}>📁</Text>
+        </Animated.View>
 
         {/* Drawing Layer (Overlay) */}
         <DrawingLayer 

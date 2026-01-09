@@ -1,22 +1,22 @@
-import { useLayoutStore } from '@/store/useLayoutStore';
 import { useFileSystemStore } from '@/store/useFileSystemStore';
+import { useLayoutStore } from '@/store/useLayoutStore';
 import { Folder } from '@/types';
-import { Folder as FolderIcon, Plus, ChevronRight } from 'lucide-react-native';
-import { memo, useMemo, useEffect } from 'react';
+import { Folder as FolderIcon, Plus } from 'lucide-react-native';
+import { memo, useMemo } from 'react';
 import { ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
-import { ThemedView } from './themed-view';
-import Animated, { 
-  useAnimatedStyle, 
-  useSharedValue, 
-  withSpring, 
+import Animated, {
   SharedValue,
-  useDerivedValue 
+  useAnimatedStyle,
+  useDerivedValue,
+  withSpring
 } from 'react-native-reanimated';
+import { ThemedView } from './themed-view';
 
 interface FolderStripProps {
   folders: Folder[];
   onFolderPress: (folderId: string) => void;
   onNewFolder: () => void;
+  onFolderLongPress: (id: string) => void;
   dropTargetFolderId?: SharedValue<string | null>;
   hoverColor?: string;
 }
@@ -33,12 +33,14 @@ const FolderCard = memo(function FolderCard({
   folder, 
   stats,
   onPress,
+  onLongPress,
   isDropTarget,
   hoverColor = '#f865c4',
 }: { 
   folder: Folder; 
   stats: FolderStats;
   onPress: () => void;
+  onLongPress: (id: string) => void;
   isDropTarget: SharedValue<boolean>;
   hoverColor?: string;
 }) {
@@ -63,6 +65,7 @@ const FolderCard = memo(function FolderCard({
       <TouchableOpacity
         style={styles.folderCardInner}
         onPress={onPress}
+        onLongPress={() => onLongPress(folder.id)}
         activeOpacity={0.7}
       >
         <View style={styles.folderHeader}>
@@ -94,6 +97,7 @@ export const FolderStrip = memo(function FolderStrip({
   folders, 
   onFolderPress, 
   onNewFolder,
+  onFolderLongPress,
   dropTargetFolderId,
   hoverColor = '#f865c4',
 }: FolderStripProps) {
@@ -168,6 +172,7 @@ export const FolderStrip = memo(function FolderStrip({
               folder={folder}
               stats={folderStats.get(folder.id) || { directFolders: 0, totalFolders: 0, directFiles: 0, totalFiles: 0 }}
               onPress={() => onFolderPress(folder.id)}
+              onLongPress={onFolderLongPress}
               dropTargetFolderId={dropTargetFolderId}
               hoverColor={hoverColor}
             />
@@ -183,12 +188,14 @@ const FolderCardWrapper = memo(function FolderCardWrapper({
   folder,
   stats,
   onPress,
+  onLongPress,
   dropTargetFolderId,
   hoverColor = '#f865c4',
 }: {
   folder: Folder;
   stats: FolderStats;
   onPress: () => void;
+  onLongPress: (id: string) => void;
   dropTargetFolderId?: SharedValue<string | null>;
   hoverColor?: string;
 }) {
@@ -201,6 +208,7 @@ const FolderCardWrapper = memo(function FolderCardWrapper({
       folder={folder}
       stats={stats}
       onPress={onPress}
+      onLongPress={onLongPress}
       isDropTarget={isDropTarget}
       hoverColor={hoverColor}
     />
