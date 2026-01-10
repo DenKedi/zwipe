@@ -2,7 +2,7 @@ import { ActionBar } from '@/components/ActionBar';
 import { DrawingLayer } from '@/components/DrawingLayer';
 import { FileCanvas } from '@/components/FileCanvas';
 import { FolderStrip } from '@/components/FolderStrip';
-import { NewFolderModal, ShareModal } from '@/components/modals';
+import { NewFolderModal } from '@/components/modals';
 import { ThemedView } from '@/components/themed-view';
 import { ZoneBar } from '@/components/ZoneBar';
 import { useFileSystem } from '@/hooks/useFileSystem';
@@ -26,7 +26,7 @@ import {
 } from '@/utils/canvasIntersection';
 import { generateRandomFiles } from '@/utils/fileSystemHelpers';
 import { useCallback, useMemo, useRef, useState } from 'react';
-import { Alert, ScrollView, Text, TouchableOpacity, View } from 'react-native';
+import { Alert, ScrollView, Share, Text, TouchableOpacity, View } from 'react-native';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import Animated, {
   runOnJS,
@@ -34,7 +34,7 @@ import Animated, {
   useAnimatedStyle,
   useSharedValue,
 } from 'react-native-reanimated';
-import { styles } from './index.styles';
+import { styles } from './_index.styles';
 
 // Zone Colors - matching ZoneBar component
 const zoneColors: Record<ZoneType, string> = {
@@ -86,8 +86,6 @@ export default function HomeScreen() {
   // Modal State
   const [showNewFolderModal, setShowNewFolderModal] = useState(false);
   const [newFolderName, setNewFolderName] = useState('');
-  const [shareModalVisible, setShareModalVisible] = useState(false);
-  const [sentStatus, setSentStatus] = useState(false);
 
   // Toast State
   const [toastVisible, setToastVisible] = useState(false);
@@ -264,30 +262,36 @@ export default function HomeScreen() {
     setShowNewFolderModal(false);
   }, []);
 
-  // --- Share Modal ---
-  const showShareModal = useCallback(
-    (isFolderShare = false) => {
+  // --- Native Share ---
+  const handleShare = useCallback(
+    async (isFolderShare = false) => {
       if (!isFolderShare && selectedFileIds.length === 0) {
         showToast('Please select at least one file to share');
         return;
       }
-      setShareModalVisible(true);
-    },
-    [selectedFileIds, showToast]
-  );
 
-  const closeShareModal = useCallback(() => setShareModalVisible(false), []);
+      try {
+        const fileCount = isFolderShare ? 'folder' : `${selectedFileIds.length} file${selectedFileIds.length > 1 ? 's' : ''}`;
+        const message = `Check out this ${fileCount} from Zwipe!`;
+        const url = 'https://example.com/shared/files'; // Replace with your actual share URL
 
-  const handleSend = useCallback(
-    (method: string) => {
-      setSentStatus(true);
-      setTimeout(() => {
-        setSentStatus(false);
-        setShareModalVisible(false);
-        clearSelection();
-      }, 1500);
+        const result = await Share.share({
+          message,
+          url, // iOS only
+          title: 'Share Files', // Android only
+        });
+
+        if (result.action === Share.sharedAction) {
+          showToast('Shared successfully!');
+          if (!isFolderShare) {
+            clearSelection();
+          }
+        }
+      } catch (error: any) {
+        showToast(error.message || 'Failed to share');
+      }
     },
-    [clearSelection]
+    [selectedFileIds, showToast, clearSelection]
   );
 
   // --- Test Files ---
@@ -651,7 +655,7 @@ export default function HomeScreen() {
         } else if (targetFolderId) {
           runOnJS(handleMoveFolder)(folderIdToTrash, targetFolderId);
         } else if (currentZone === 'share') {
-          runOnJS(showShareModal)(true);
+          runOnJS(handleShare)(true);
         }
       } else if (isDrawing.value) {
         const willPerformAction =
@@ -666,7 +670,7 @@ export default function HomeScreen() {
         } else if (targetFolderId) {
           runOnJS(handleDropAction)(targetFolderId);
         } else if (currentZone === 'share') {
-          runOnJS(showShareModal)(false);
+          runOnJS(handleShare)(false);
         }
       }
 
@@ -831,13 +835,6 @@ export default function HomeScreen() {
         />
 
         {/* Modals */}
-        <ShareModal
-          visible={shareModalVisible}
-          sentStatus={sentStatus}
-          onClose={closeShareModal}
-          onSend={handleSend}
-        />
-
         <NewFolderModal
           visible={showNewFolderModal}
           folderName={newFolderName}
