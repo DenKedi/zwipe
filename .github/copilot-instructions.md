@@ -6,124 +6,128 @@ Zwipe is a gesture-based file management mobile app (Expo SDK 54, React Native 0
 
 **Run**: `npm install && npx expo start` (press `i`/`a`/`w` for iOS/Android/web)
 
-**Note**: This is a frontend dummy with mock data - no actual file system integration. Future versions may connect to Amazon S3 or Google Drive.
-
-## App Layout (Top to Bottom)
-
-1. **Folder Section (~20%)**: Horizontal scrollable strip + breadcrumb navigation
-2. **Zone Bar**: Action zones between folders and canvas (trash, temp, duplicate, share)
-3. **File Canvas (~70%)**: Infinite zoomable 2D grid where files are positioned
-
-## Core Interaction: Drawing Multi-Selection
-
-1. Click + drag on canvas background → draws glowing gradient line (blue `#576ffb` → pink `#f865c4`)
-2. Files the line touches → selected (border glow + slight scale up)
-3. Release → selection persists
-4. Draw again → accumulative selection
-5. Drag selection to folder/zone → batch action
-
-**Visual feedback**: Start point has blue dot, end point follows finger. Selected files inherit line color at intersection point.
+**Status**: Frontend prototype with mock data - see [FEATURE_CHECKLIST.md](../FEATURE_CHECKLIST.md) for implementation status.
 
 ## Architecture
 
 ### Component Hierarchy
 
 ```
-app/(tabs)/index.tsx     # Main screen - orchestrates gestures, state, modals
-├── FolderStrip          # Top: horizontal folder bar with breadcrumbs
-├── ZoneBar              # Action zones (trash, temp, copy, share)
-├── FileCanvas           # Infinite zoomable grid with files
-└── DrawingLayer         # SVG path rendering for gesture lines
+app/(tabs)/index.tsx     # Main orchestrator (~1400 lines) - gestures, modals, all handlers
+├── FolderStrip          # Horizontal folder bar + breadcrumbs + folder drag
+├── ZoneBar              # Action zones (trash, temp, copy, share) with hover animations
+├── FileCanvas           # Infinite zoomable grid with positioned files
+└── DrawingLayer         # SVG path with gradient + glow effect
 ```
 
-### State Management Pattern
+### State Management (3-Store Pattern)
 
-- **Zustand stores** (`store/`): Global state - no Provider, direct imports
-  - `useFileSystemStore`: Files/folders CRUD, hierarchical navigation
-  - `useLayoutStore`: Component layout registry for collision detection
-- **Custom hooks** (`hooks/`): Business logic wrappers
-  - `useFileSystem`: Wraps store with auto-initialization + factory methods
-  - `useSelection`: Drawing state + intersection detection
-- **Reanimated SharedValues**: Gesture/animation state on worklet thread
-
-### Critical Gesture Pattern
-
-Gestures run on worklet thread - **no direct React state in gesture callbacks**:
+- **`useFileSystemStore`**: Files/folders CRUD with `parentId` hierarchy
+- **`useSelectionStore`**: Selection state with `pending` (during draw) + `committed` phases
+- **`useLayoutStore`**: Component bounds registry for worklet hit-testing
 
 ```tsx
-// In app/(tabs)/index.tsx
-const scale = useSharedValue(1);
-const savedScale = useSharedValue(1); // Persist between gestures
-
-const pinchGesture = Gesture.Pinch()
-  .onStart(() => {
-    /* read savedScale.value */
-  })
-  .onEnd(() => {
-    savedScale.value = scale.value;
-  }); // Save state
-
-const panGesture = Gesture.Pan().minPointers(1).maxPointers(1); // Drawing
+// Direct import pattern (no Providers)
+import { useFileSystemStore } from '@/store/useFileSystemStore';
+const { files, moveFilesToFolder } = useFileSystemStore();
 ```
 
-Use `runOnJS()` to bridge worklet → React state.
+### Undo/Redo Action Pattern
 
-### Layout Registration (for collision detection)
-
-Components register their bounds via `useLayoutStore`:
+All user actions go through `store/actions/` with Command pattern:
 
 ```tsx
-onLayout={(e) => registerItem('zone-trash', 'zone', e.nativeEvent.layout, 'trash')}
+// 1. Define action factory in store/actions/fileActions.ts
+export function createMoveFilesAction(
+  moveInfos: FileMoveInfo[],
+  targetId: string
+): Action {
+  return {
+    type: ActionType.MOVE_FILES,
+    description: `Move ${moveInfos.length} files`,
+    undo: () => {
+      /* restore previous parentIds */
+    },
+    redo: () => {
+      /* re-apply move */
+    },
+  };
+}
+
+// 2. Execute via useActionHistoryStore
+const { execute } = useActionHistoryStore();
+execute(createMoveFilesAction(moveInfos, targetId));
 ```
 
-### SVG Path Generation
+### Critical: Worklet Thread Separation
 
-Drawing uses smooth quadratic bezier curves from point arrays:
+Gestures run on UI thread. **Never access React state directly in gesture callbacks**:
 
 ```tsx
-// Build path from accumulated points
-path.value = `M ${x0} ${y0} Q ${x1} ${y1} ${xc} ${yc} ...`;
+// ❌ WRONG - will crash
+.onUpdate((e) => {
+  setSelectedFiles(calculate(e.x, e.y)); // React state in worklet!
+})
+
+// ✅ CORRECT - use SharedValues + runOnJS bridge
+const activeSelection = useSharedValue<string[]>([]);
+.onUpdate((e) => {
+  'worklet';
+  const ids = calculateIntersectedIds(e.x, e.y, ...); // Pure worklet function
+  activeSelection.value = ids;
+})
+
+// Sync to React via useAnimatedReaction
+useAnimatedReaction(
+  () => activeSelection.value,
+  (current) => { runOnJS(handleSelectionUpdate)(current); }
+);
 ```
 
-See `DrawingLayer.tsx` for gradient + glow effect implementation.
+### Canvas Coordinate Transform
+
+Screen → Canvas conversion (accounts for scale/translate around center):
+
+```tsx
+// In calculateIntersectedIds worklet
+const cx = canvasW / 2;
+const cy = canvasH / 2;
+const canvasX = (localX - transX - (1 - currentScale) * cx) / currentScale;
+const canvasY = (localY - transY - (1 - currentScale) * cy) / currentScale;
+```
 
 ## Key Conventions
 
-### Files & Imports
-
-- **Path alias**: `@/` → project root (e.g., `import { FileSystemItem } from '@/types'`)
-- **Types**: Define shared interfaces in `types/index.ts`
-
-### Theming
-
-- Themed components: `ThemedView`, `ThemedText` with `lightColor`/`darkColor` props
-- Dark canvas: `#0f172a`, grid dots: `#334155`
-- Drawing gradient: `#576ffb` → `#f865c4`
-
-### Styling
-
-- `StyleSheet.create()` at component bottom
-- Files: 100x100px rounded squares with `borderRadius: 20`
+- **Path alias**: `@/` → project root
+- **Types**: All shared interfaces in [types/index.ts](../types/index.ts)
+- **Styling**: `StyleSheet.create()` at component bottom; files are 100×100px, `borderRadius: 20`
+- **Icons**: Lucide React Native (not `@expo/vector-icons`)
+- **Colors**: Canvas `#0f172a`, grid dots `#334155`, drawing gradient `#576ffb` → `#f865c4`
 
 ## Common Tasks
 
 ### Add a new zone type
 
-1. Add to `ZoneType` union in `types/index.ts`
-2. Add to `LayoutItem['zoneType']` in `store/useLayoutStore.ts`
-3. Implement zone UI in `components/ZoneBar.tsx`
-4. Handle action in gesture end handler in `app/(tabs)/index.tsx`
+1. Add to `ZoneType` in [types/index.ts](../types/index.ts): `'trash' | 'temp' | 'copy' | 'share' | 'newzone'`
+2. Add entry in `zones` array in [ZoneBar.tsx](../components/ZoneBar.tsx)
+3. Handle in `checkZoneIntersection` worklet and gesture `.onEnd()` in [index.tsx](<../app/(tabs)/index.tsx>)
 
-### Add new file actions
+### Add a new undoable action
 
-1. Create action in `useFileSystemStore` (immutable state updates)
-2. Expose via `useFileSystem` hook
-3. Call from gesture/UI handlers using `runOnJS()` if in worklet
+1. Create factory in `store/actions/` following [fileActions.ts](../store/actions/fileActions.ts) pattern
+2. Export from [store/actions/index.ts](../store/actions/index.ts)
+3. Call `execute(createYourAction(...))` from handler
 
-## Dependencies Notes
+### Collision detection
 
-- **Reanimated 4.1**: `'worklet'` directive required for gesture handlers
-- **Lucide icons**: Prefer over `@expo/vector-icons` for custom icons
-- **Zustand 5**: Direct store imports, no Provider wrapper
-- **Web limitations**: Multi-touch gestures don't work - test zoom/pan on device
+Files use spatial grid for performance - see [collisionDetection.ts](../utils/collisionDetection.ts):
+
+- `FILE_WIDTH = 100`, `FILE_HEIGHT = 100`
+- Max 20% overlap allowed between files
+
+## Gotchas
+
+- **Web**: Multi-touch (pinch zoom) doesn't work - test on device/simulator
 - **GestureHandlerRootView**: Required wrapper in `app/_layout.tsx`
+- **SharedValue persistence**: Use `savedScale`/`savedTranslate` pattern to persist between gestures
+- **Folder drag**: Uses long-press → drag pattern with ghost overlay (`ghostStyle`)
