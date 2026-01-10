@@ -25,8 +25,9 @@ export function FileCanvas({
   selectedFileIds,
   onFileSelect,
 }: FileCanvasProps) {
-  const gridSpacing = 100;
-  const gridSize = 50; // 50x50 grid for larger canvas
+  // Optimized: Reduced from 50x50 (2500 views) to 10x10 (100 views) for better performance
+  const gridSpacing = 200;
+  const gridSize = 10;
 
   const animatedStyle = useAnimatedStyle(() => ({
     transform: [

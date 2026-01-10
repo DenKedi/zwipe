@@ -4,26 +4,33 @@ import { FolderStrip } from '@/components/FolderStrip';
 import { ThemedView } from '@/components/themed-view';
 import { ZoneBar, zones } from '@/components/ZoneBar';
 import { useFileSystem } from '@/hooks/useFileSystem';
-import { createDeleteFilesAction, createMoveFilesAction, createMoveFolderAction, createSelectFilesAction, createToggleSelectionAction, FileMoveInfo, useActionHistoryStore } from '@/store/actions';
-import { useLayoutStore } from '@/store/useLayoutStore';
+import { useActionHistoryStore, createSelectFilesAction, createToggleSelectionAction, createMoveFilesAction, createDeleteFilesAction, FileMoveInfo } from '@/store/actions';
 import { useSelectionStore } from '@/store/useSelectionStore';
 import { BreadcrumbSegment, FileSystemItem, ZoneType } from '@/types';
 import { generateRandomFiles } from '@/utils/fileSystemHelpers';
-import { Eraser, Redo2, Undo2 } from 'lucide-react-native';
+import { getOrganizedFilePositions, GroupByOption, SortByOption } from '@/utils/groupSort';
+import { Undo2, Redo2, Eraser, MoreVertical, Group, ArrowDownAZ } from 'lucide-react-native';
 import { useCallback, useMemo, useRef, useState } from 'react';
-import { Alert, Image, Modal, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { Alert, Modal, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import Animated, { runOnJS, useAnimatedReaction, useAnimatedStyle, useSharedValue } from 'react-native-reanimated';
 
 export default function HomeScreen() {
   const [dimensions, setDimensions] = useState({ width: 0, height: 0 });
-  const { files, folders, createFolder, createFile, moveFilesToFolder, deleteFolder, moveFolder, getFolderById } = useFileSystem();
+  const { files, folders, createFolder, createFile, moveFilesToFolder, deleteFolder } = useFileSystem();
   
   // Navigation State
   const [currentFolderId, setCurrentFolderId] = useState<string | null>(null);
   const [breadcrumbs, setBreadcrumbs] = useState<BreadcrumbSegment[]>([
     { id: 'home', name: 'Home' }
   ]);
+  
+  // Group and Sort State
+  const [groupBy, setGroupBy] = useState<GroupByOption>('none');
+  const [sortBy, setSortBy] = useState<SortByOption>('none');
+  const [showGroupMenu, setShowGroupMenu] = useState(false);
+  const [showSortMenu, setShowSortMenu] = useState(false);
+  const [showSelectionMenu, setShowSelectionMenu] = useState(false);
 
   // Action History for undo/redo
   const { execute, undo, redo, canUndo, canRedo } = useActionHistoryStore();
@@ -47,41 +54,6 @@ export default function HomeScreen() {
   // Folder creation modal
   const [showNewFolderModal, setShowNewFolderModal] = useState(false);
   const [newFolderName, setNewFolderName] = useState('');
-
-  // Share Modal state
-  const [shareModalVisible, setShareModalVisible] = useState(false);
-  const [sentStatus, setSentStatus] = useState(false);
-
-  // Toast state for user notifications
-  const [toastVisible, setToastVisible] = useState(false);
-  const [toastMessage, setToastMessage] = useState('');
-
-  const showToast = useCallback((message: string) => {
-    setToastMessage(message);
-    setToastVisible(true);
-    setTimeout(() => setToastVisible(false), 1500);
-  }, []);
-
-  const showShareModal = useCallback((isFolderShare = false) => {
-    // If this is a drawing-based share and there are no selected files, warn the user
-    if (!isFolderShare && selectedFileIds.length === 0) {
-      showToast('Please select at least one file to share');
-      return;
-    }
-    setShareModalVisible(true);
-  }, [selectedFileIds, showToast]);
-
-  const closeShareModal = useCallback(() => setShareModalVisible(false), []);
-
-  const handleSend = useCallback((method: string) => {
-    // method param reserved for analytics/future branching
-    setSentStatus(true);
-    setTimeout(() => {
-      setSentStatus(false);
-      setShareModalVisible(false);
-      clearSelection();
-    }, 1500);
-  }, [clearSelection]);
   
   // Canvas State
   const scale = useSharedValue(1);
@@ -90,6 +62,7 @@ export default function HomeScreen() {
   const translateY = useSharedValue(0);
   const savedTranslateX = useSharedValue(0);
   const savedTranslateY = useSharedValue(0);
+  const isPinching = useSharedValue(false);
 
   // Drawing State
   const path = useSharedValue('');
@@ -104,16 +77,8 @@ export default function HomeScreen() {
   // Shared Value to hold live selection from UI thread
   const activeSelection = useSharedValue<string[]>([]);
   const canvasLayout = useSharedValue({ x: 0, y: 0, width: 0, height: 0 });
-  const folderStripX = useSharedValue(0);
   const folderStripY = useSharedValue(0);
-  const folderStripHeight = useSharedValue(0);
   const dropTargetFolderId = useSharedValue<string | null>(null);
-  // FolderStrip scrollX shared value for accurate hit-testing (pixels)
-  const folderStripScrollX = useSharedValue(0);
-  // Screen width tracked as shared value so worklets can detect edge proximity
-  const screenWidth = useSharedValue(0);
-  // Autoscroll direction shared value: -1 left, 0 stop, 1 right
-  const autoScrollDir = useSharedValue(0);
 
   // Folder State
   const draggingFolderId = useSharedValue<string | null>(null);
@@ -195,26 +160,15 @@ export default function HomeScreen() {
     setGradientStartColor(defaultGradient.start);
     setGradientEndColor(defaultGradient.end);
   };
-
-  // FolderStrip imperative ref and helpers for autoscroll (used via runOnJS from worklets)
-  const folderStripRef = useRef<any>(null);
-  const startFolderStripAutoScroll = useCallback((dir: number) => {
-    folderStripRef.current?.startAutoScroll?.(dir);
-  }, []);
-  const stopFolderStripAutoScroll = useCallback(() => {
-    folderStripRef.current?.stopAutoScroll?.();
-  }, []);
-
   // -----------------------------------------------------
 
   // Syncs UI-Thread selection with React State only when changed
   useAnimatedReaction(
     () => activeSelection.value,
     (current, previous) => {
-      // Optimized: Fast array comparison without JSON.stringify
-      const prevArr = previous ?? [];
-      if (current.length !== prevArr.length || 
-          current.some((id, i) => id !== prevArr[i])) {
+      // Basic check to avoid redundant JS calls
+      if (JSON.stringify(current) !== JSON.stringify(previous)) {
+        // FIX: Pass raw data to named JS function instead of inline function
         runOnJS(handleSelectionUpdate)(current);
       }
     }
@@ -230,6 +184,28 @@ export default function HomeScreen() {
       currentFolderId ? file.parentId === currentFolderId : !file.parentId
     ), [files, currentFolderId]);
   
+  // Calculate organized file positions and groups based on groupBy/sortBy settings
+  const { positions: organizedPositions, groups: fileGroups } = useMemo(() => {
+    if (groupBy === 'none' && sortBy === 'none') {
+      return { positions: new Map(), groups: [] };
+    }
+    return getOrganizedFilePositions(visibleFiles, groupBy, sortBy);
+  }, [visibleFiles, groupBy, sortBy]);
+  
+  // Get files with potentially modified positions
+  const displayFiles = useMemo(() => {
+    if (organizedPositions.size === 0) {
+      return visibleFiles;
+    }
+    return visibleFiles.map(file => {
+      const newPos = organizedPositions.get(file.id);
+      if (newPos) {
+        return { ...file, x: newPos.x, y: newPos.y };
+      }
+      return file;
+    });
+  }, [visibleFiles, organizedPositions]);
+  
   const currentFolders = useMemo(() => 
     folders.filter(folder => 
       currentFolderId ? folder.parentId === currentFolderId : !folder.parentId
@@ -241,11 +217,6 @@ export default function HomeScreen() {
     if (folder) {
       setCurrentFolderId(folderId);
       setBreadcrumbs(prev => [...prev, { id: folderId, name: folder.name }]);
-
-      // Reset FolderStrip scroll to the left when navigating into a folder
-      if (folderStripRef.current?.scrollToStart) {
-        folderStripRef.current.scrollToStart();
-      }
     }
   }, [folders]);
 
@@ -370,52 +341,45 @@ export default function HomeScreen() {
     );
   }, [deleteFolder]);
 
-  // Move folder (drag into another folder) with protections against cycles
-  const handleMoveFolder = useCallback((folderId: string, targetId: string) => {
-    if (folderId === targetId) {
-      showToast('Cannot move a folder into itself');
-      return;
-    }
-
-    // Check if target is a descendant of folderId (prevent circular move)
-    let p = getFolderById(targetId);
-    while (p) {
-      if (p.id === folderId) {
-        showToast('Cannot move a folder into one of its sub-folders');
-        return;
-      }
-      if (!p.parentId) break;
-      p = getFolderById(p.parentId);
-    }
-
-    // Valid move - capture previous parent for undo
-    const previousParent = getFolderById(folderId)?.parentId || null;
-    moveFolder(folderId, targetId);
-
-    // Create action for undo/redo
-    const action = createMoveFolderAction(folderId, previousParent, targetId);
-    execute(action);
-
-    showToast('Folder moved');
-  }, [getFolderById, moveFolder, showToast]);
-
   // Move Folder via longpress
   const handleFolderLongPress = useCallback((id: string) => {
     draggingFolderId.value = id;
     isDrawing.value = false;
+  }, []);
 
-    // Try to initialize ghost position from registered layout (center of folder card)
-    try {
-      const items = useLayoutStore.getState().getItems();
-      const folderLayout = items.find(it => it.id === id && it.type === 'folder');
-      if (folderLayout) {
-        dragX.value = folderLayout.layout.x + folderLayout.layout.width / 2;
-        dragY.value = folderLayout.layout.y + folderLayout.layout.height / 2;
-      }
-      dropTargetFolderId.value = null;
-    } catch (e) {
-      // ignore
-    }
+  // Handle grouping selected files
+  const handleGroupSelectedFiles = useCallback(() => {
+    if (selectedFileIds.length === 0) return;
+    
+    // Create a new folder and move selected files into it
+    const folderName = `Group ${new Date().toLocaleTimeString()}`;
+    const newFolder = createFolder(folderName, currentFolderId || undefined);
+    
+    // Track previous parent IDs for undo
+    const filesToMove = files.filter(f => selectedFileIds.includes(f.id));
+    const moveInfos: FileMoveInfo[] = filesToMove.map(file => ({
+      fileId: file.id,
+      previousParentId: file.parentId || null,
+      newParentId: newFolder.id,
+    }));
+    
+    // Execute the move
+    moveFilesToFolder(selectedFileIds, newFolder.id);
+    
+    // Create action for undo/redo
+    const action = createMoveFilesAction(moveInfos, newFolder.id);
+    execute(action);
+    
+    // Clear selection after grouping
+    clearSelection();
+    setShowSelectionMenu(false);
+  }, [selectedFileIds, files, currentFolderId, createFolder, moveFilesToFolder, clearSelection, execute]);
+
+  // Close dropdown menus
+  const closeMenus = useCallback(() => {
+    setShowGroupMenu(false);
+    setShowSortMenu(false);
+    setShowSelectionMenu(false);
   }, []);
 
   // Gestures
@@ -430,8 +394,10 @@ export default function HomeScreen() {
   });
 
   const pinchGesture = Gesture.Pinch()
-    .runOnJS(true)
     .onStart((e) => {
+      'worklet';
+      isPinching.value = true;
+      
       // Work in CANVAS-local coordinates (gesture events are local to the GestureDetector view)
       const cx = canvasLayout.value.width / 2;
       const cy = canvasLayout.value.height / 2;
@@ -442,7 +408,8 @@ export default function HomeScreen() {
       const startOffsetX = cx * (1 - savedScale.value) + savedTranslateX.value;
       const startOffsetY = cy * (1 - savedScale.value) + savedTranslateY.value;
 
-      pinchStartValues.current = {
+      // Access current values directly - they're available in worklet context
+      const currentValues = {
         scale: savedScale.value,
         translateX: savedTranslateX.value,
         translateY: savedTranslateY.value,
@@ -451,8 +418,14 @@ export default function HomeScreen() {
         offsetX: startOffsetX,
         offsetY: startOffsetY,
       };
+      
+      // Update ref on JS thread
+      runOnJS((values: typeof currentValues) => {
+        pinchStartValues.current = values;
+      })(currentValues);
     })
     .onUpdate((e) => {
+      'worklet';
       const cx = canvasLayout.value.width / 2;
       const cy = canvasLayout.value.height / 2;
 
@@ -472,9 +445,15 @@ export default function HomeScreen() {
       translateY.value = newOffsetY - cy * (1 - newScale);
     })
     .onEnd(() => {
+      'worklet';
       savedScale.value = scale.value;
       savedTranslateX.value = translateX.value;
       savedTranslateY.value = translateY.value;
+      isPinching.value = false;
+    })
+    .onFinalize(() => {
+      'worklet';
+      isPinching.value = false;
     });
 
 // Intersection Helper for files
@@ -519,7 +498,22 @@ export default function HomeScreen() {
     const hitboxPadX = (FILE_WIDTH * 0.05) / 2;
     const hitboxPadY = (FILE_HEIGHT * 0.05) / 2;
 
+    // Quick distance check before detailed intersection
+    // Only check files within a reasonable radius (performance optimization)
+    const maxDistance = 200; // pixels
+    
     for (const file of visibleFiles) {
+      // Early exit: skip files far from touch point
+      const fileCenterX = file.x + FILE_WIDTH / 2;
+      const fileCenterY = file.y + FILE_HEIGHT / 2;
+      const dx = fileCenterX - canvasX;
+      const dy = fileCenterY - canvasY;
+      const distSquared = dx * dx + dy * dy;
+      
+      if (distSquared > maxDistance * maxDistance) {
+        continue; // Skip distant files
+      }
+      
       if (
         selectionArea.maxX > file.x - hitboxPadX &&
         selectionArea.minX < file.x + FILE_WIDTH + hitboxPadX &&
@@ -554,8 +548,7 @@ export default function HomeScreen() {
     }
 
     // Calculate X position relative to scroll content
-    // Account for current scroll offset reported by FolderStrip and the strip's X on screen
-    const xInStrip = x - (PADDING_LEFT + folderStripX.value) + folderStripScrollX.value;
+    const xInStrip = x - PADDING_LEFT;
     const itemStride = CARD_WIDTH + GAP;
     
     const index = Math.floor(xInStrip / itemStride);
@@ -603,13 +596,14 @@ export default function HomeScreen() {
     .maxPointers(1)
     .onStart((e) => {
       'worklet';
-      // If touch starts inside the FolderStrip, let the ScrollView / touchables handle it
-      if (e.y >= folderStripY.value && e.y <= (folderStripY.value + folderStripHeight.value)) {
-        isDrawing.value = false;
-        // do not initialize drawing state so ScrollView can handle horizontal scrolls and taps
+      // Don't start panning if we're pinching
+      if (isPinching.value) {
         return;
       }
-
+      
+      // Close dropdown menus when user starts drawing/interacting
+      runOnJS(closeMenus)();
+      
       dragX.value = e.x;
       dragY.value = e.y;
       // long press check
@@ -635,6 +629,11 @@ export default function HomeScreen() {
     .onUpdate((e) => {
       'worklet';
 
+      // Don't continue panning if pinching started
+      if (isPinching.value) {
+        return;
+      }
+
       if (isDrawing.value) {
         currentX.value = e.x;
         currentY.value = e.y;
@@ -646,7 +645,7 @@ export default function HomeScreen() {
         const ids = calculateIntersectedIds(
           e.x,
           e.y,
-          visibleFiles,
+          displayFiles,
           scale.value,
           translateX.value,
           translateY.value,
@@ -657,49 +656,30 @@ export default function HomeScreen() {
         );
         activeSelection.value = ids;
 
-        // Optimized: Only add point if moved enough distance (reduces path complexity)
-        const MAX_POINTS = 50;
-        const MIN_DISTANCE = 5;
+        // Add new point        
+        const newPointsX = [...pointsX.value, e.x];
+        const newPointsY = [...pointsY.value, e.y];
+        pointsX.value = newPointsX;
+        pointsY.value = newPointsY;
         
-        let currentPointsX = pointsX.value;
-        let currentPointsY = pointsY.value;
-        
-        const lastX = currentPointsX[currentPointsX.length - 1] ?? 0;
-        const lastY = currentPointsY[currentPointsY.length - 1] ?? 0;
-        const dist = Math.sqrt((e.x - lastX) ** 2 + (e.y - lastY) ** 2);
-        
-        // Only add point if moved MIN_DISTANCE pixels
-        if (dist >= MIN_DISTANCE || currentPointsX.length === 0) {
-          // Thin out points if approaching limit
-          if (currentPointsX.length >= MAX_POINTS) {
-            currentPointsX = currentPointsX.filter((_, i) => i % 2 === 0);
-            currentPointsY = currentPointsY.filter((_, i) => i % 2 === 0);
+        // Generate smooth path        
+        if (newPointsX.length === 1) {
+          path.value = `M ${newPointsX[0]} ${newPointsY[0]}`;
+        } else {
+          let pathStr = `M ${newPointsX[0]} ${newPointsY[0]}`;
+          for (let i = 1; i < newPointsX.length - 1; i++) {
+            const xc = (newPointsX[i] + newPointsX[i + 1]) / 2;
+            const yc = (newPointsY[i] + newPointsY[i + 1]) / 2;
+            pathStr += ` Q ${newPointsX[i]} ${newPointsY[i]} ${xc} ${yc}`;
           }
-          
-          const newPointsX = [...currentPointsX, e.x];
-          const newPointsY = [...currentPointsY, e.y];
-          pointsX.value = newPointsX;
-          pointsY.value = newPointsY;
-          
-          // Generate smooth path        
-          if (newPointsX.length === 1) {
-            path.value = `M ${newPointsX[0]} ${newPointsY[0]}`;
-          } else {
-            let pathStr = `M ${newPointsX[0]} ${newPointsY[0]}`;
-            for (let i = 1; i < newPointsX.length - 1; i++) {
-              const xc = (newPointsX[i] + newPointsX[i + 1]) / 2;
-              const yc = (newPointsY[i] + newPointsY[i + 1]) / 2;
-              pathStr += ` Q ${newPointsX[i]} ${newPointsY[i]} ${xc} ${yc}`;
-            }
 
-            // Last point
-            if (newPointsX.length > 1) {
-              const lastIdx = newPointsX.length - 1;
-              const prevIdx = newPointsX.length - 2;
-              pathStr += ` Q ${newPointsX[prevIdx]} ${newPointsY[prevIdx]} ${newPointsX[lastIdx]} ${newPointsY[lastIdx]}`;
-            }
-            path.value = pathStr;
+          // Last point
+          if (newPointsX.length > 1) {
+            const lastIdx = newPointsX.length - 1;
+            const prevIdx = newPointsX.length - 2;
+            pathStr += ` Q ${newPointsX[prevIdx]} ${newPointsY[prevIdx]} ${newPointsX[lastIdx]} ${newPointsY[lastIdx]}`;
           }
+          path.value = pathStr;
         }
 
         // Check folder intersection
@@ -731,47 +711,7 @@ export default function HomeScreen() {
       else if (draggingFolderId.value) {
         dragX.value = e.x;
         dragY.value = e.y;
-
-        // Check if hovering over a folder in the strip
-        const folderId = checkFolderIntersection(e.x, e.y, currentFolders);
-        if (folderId) {
-          dropTargetFolderId.value = folderId;
-          hoveredZoneType.value = null;
-        } else {
-          dropTargetFolderId.value = null;
-          hoveredZoneType.value = checkZoneIntersection(e.x, e.y);
-        }
-
-        // Autoscroll detection for FolderStrip (worklet-safe)
-        const EDGE_ZONE = 60; // px from screen edges
-        // Only consider autoscroll when finger is within the FolderStrip vertical bounds
-        if (e.y >= folderStripY.value && e.y <= (folderStripY.value + folderStripHeight.value)) {
-          // Left edge
-          if (e.x <= EDGE_ZONE) {
-            if (autoScrollDir.value !== -1) {
-              autoScrollDir.value = -1;
-              runOnJS(startFolderStripAutoScroll)(-1);
-            }
-          }
-          // Right edge
-          else if (e.x >= (screenWidth.value - EDGE_ZONE)) {
-            if (autoScrollDir.value !== 1) {
-              autoScrollDir.value = 1;
-              runOnJS(startFolderStripAutoScroll)(1);
-            }
-          } else {
-            if (autoScrollDir.value !== 0) {
-              autoScrollDir.value = 0;
-              runOnJS(stopFolderStripAutoScroll)();
-            }
-          }
-        } else {
-          // Not hovering folder strip - ensure autoscroll stopped
-          if (autoScrollDir.value !== 0) {
-            autoScrollDir.value = 0;
-            runOnJS(stopFolderStripAutoScroll)();
-          }
-        }
+        hoveredZoneType.value = checkZoneIntersection(e.x, e.y);
       }
     })
     .onEnd(() => {
@@ -781,16 +721,10 @@ export default function HomeScreen() {
       const folderIdToTrash = draggingFolderId.value;
       const targetFolderId = dropTargetFolderId.value;
 
-      // delete / drop folder
+      // delete folder
       if (folderIdToTrash) {
         if (currentZone === 'trash') {
           runOnJS(handleDeleteFolder)(folderIdToTrash);
-        } else if (targetFolderId) {
-          // Attempt to drop folder into another folder
-          runOnJS(handleMoveFolder)(folderIdToTrash, targetFolderId);
-        } else if (currentZone === 'share') {
-          // Dragging a folder into Share zone
-          runOnJS(showShareModal)(true);
         }
       } 
       else if (isDrawing.value) {
@@ -807,24 +741,14 @@ export default function HomeScreen() {
           runOnJS(handleDeleteAction)();
         } else if (targetFolderId) {
           runOnJS(handleDropAction)(targetFolderId);
-        } else if (currentZone === 'share') {
-          // Drawing selection dropped onto Share zone
-          runOnJS(showShareModal)(false);
         }
       }
 
       // reset everything
+      isDrawing.value = false;
       draggingFolderId.value = null;
       dropTargetFolderId.value = null;
       hoveredZoneType.value = null;
-      dragX.value = 0;
-      dragY.value = 0;
-
-      // Ensure autoscroll is stopped
-      if (autoScrollDir.value !== 0) {
-        autoScrollDir.value = 0;
-        runOnJS(stopFolderStripAutoScroll)();
-      }
 
       // Reset gradient colors
       runOnJS(handleResetGradient)();
@@ -850,12 +774,7 @@ export default function HomeScreen() {
     <GestureDetector gesture={composedGesture}>
       <ThemedView 
         style={styles.container} 
-        onLayout={(e) => {
-          const layout = e.nativeEvent.layout;
-          setDimensions(layout);
-          // Keep shared screen width in sync for worklets
-          screenWidth.value = layout.width;
-        }}
+        onLayout={(e) => setDimensions(e.nativeEvent.layout)}
       >
         {/* Header */}
         <View style={styles.headerSection}>
@@ -883,24 +802,17 @@ export default function HomeScreen() {
         <View 
           style={styles.folderSection}
           onLayout={(e) => {
-            const { x, y, width, height } = e.nativeEvent.layout;
-            folderStripX.value = x;
-            folderStripY.value = y;
-            folderStripHeight.value = height;
+            folderStripY.value = e.nativeEvent.layout.y;
           }}
         >
           <FolderStrip 
-            ref={folderStripRef}
             folders={currentFolders}
             onFolderPress={handleFolderPress}
             onNewFolder={handleNewFolder}
+            onAddTestFiles={handleAddTestFiles}
             onFolderLongPress={handleFolderLongPress}
             dropTargetFolderId={dropTargetFolderId}
             hoverColor={gradientEndColor}
-            onScrollXChange={(x: number) => {
-              // Update shared value used by worklets
-              folderStripScrollX.value = x;
-            }}
           />
         </View>
 
@@ -926,16 +838,121 @@ export default function HomeScreen() {
           }}
         >
           <View style={styles.canvasHeader}>
-            <TouchableOpacity style={styles.addTestButton} onPress={handleAddTestFiles}>
-              <Text style={styles.addTestButtonText}>+ Add Test Files</Text>
-            </TouchableOpacity>
+            {/* Group By Button */}
+            <View style={styles.groupSortButtonWrapper}>
+              <TouchableOpacity 
+                style={[
+                  styles.groupSortButton,
+                  groupBy !== 'none' && styles.groupSortButtonActive
+                ]}
+                onPress={() => setShowGroupMenu(!showGroupMenu)}
+              >
+                <Group size={16} color={groupBy !== 'none' ? '#3b82f6' : '#94a3b8'} strokeWidth={2} />
+                <Text style={[
+                  styles.groupSortButtonText,
+                  groupBy !== 'none' && styles.groupSortButtonTextActive
+                ]}>
+                  Group By{groupBy !== 'none' ? `: ${groupBy.charAt(0).toUpperCase() + groupBy.slice(1)}` : ''}
+                </Text>
+              </TouchableOpacity>
+              {/* Group By Dropdown Menu */}
+              {showGroupMenu && (
+                <View style={styles.dropdownMenu}>
+                  <TouchableOpacity 
+                    style={[styles.dropdownItem, groupBy === 'none' && styles.dropdownItemActive]}
+                    onPress={() => { setGroupBy('none'); setShowGroupMenu(false); }}
+                  >
+                    <Text style={styles.dropdownItemText}>None</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity 
+                    style={[styles.dropdownItem, groupBy === 'type' && styles.dropdownItemActive]}
+                    onPress={() => { setGroupBy('type'); setShowGroupMenu(false); }}
+                  >
+                    <Text style={styles.dropdownItemText}>Type</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity 
+                    style={[styles.dropdownItem, groupBy === 'extension' && styles.dropdownItemActive]}
+                    onPress={() => { setGroupBy('extension'); setShowGroupMenu(false); }}
+                  >
+                    <Text style={styles.dropdownItemText}>Extension</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity 
+                    style={[styles.dropdownItem, groupBy === 'year' && styles.dropdownItemActive]}
+                    onPress={() => { setGroupBy('year'); setShowGroupMenu(false); }}
+                  >
+                    <Text style={styles.dropdownItemText}>Year</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity 
+                    style={[styles.dropdownItem, groupBy === 'month' && styles.dropdownItemActive]}
+                    onPress={() => { setGroupBy('month'); setShowGroupMenu(false); }}
+                  >
+                    <Text style={styles.dropdownItemText}>Month</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity 
+                    style={[styles.dropdownItem, groupBy === 'day' && styles.dropdownItemActive]}
+                    onPress={() => { setGroupBy('day'); setShowGroupMenu(false); }}
+                  >
+                    <Text style={styles.dropdownItemText}>Day</Text>
+                  </TouchableOpacity>
+                </View>
+              )}
+            </View>
+
+            {/* Sort By Button */}
+            <View style={styles.groupSortButtonWrapper}>
+              <TouchableOpacity 
+                style={[
+                  styles.groupSortButton,
+                  sortBy !== 'none' && styles.groupSortButtonActive
+                ]}
+                onPress={() => setShowSortMenu(!showSortMenu)}
+              >
+                <ArrowDownAZ size={16} color={sortBy !== 'none' ? '#3b82f6' : '#94a3b8'} strokeWidth={2} />
+                <Text style={[
+                  styles.groupSortButtonText,
+                  sortBy !== 'none' && styles.groupSortButtonTextActive
+                ]}>
+                  Sort By{sortBy !== 'none' ? `: ${sortBy.charAt(0).toUpperCase() + sortBy.slice(1)}` : ''}
+                </Text>
+              </TouchableOpacity>
+              {/* Sort By Dropdown Menu */}
+              {showSortMenu && (
+                <View style={styles.dropdownMenu}>
+                  <TouchableOpacity 
+                    style={[styles.dropdownItem, sortBy === 'none' && styles.dropdownItemActive]}
+                    onPress={() => { setSortBy('none'); setShowSortMenu(false); }}
+                  >
+                    <Text style={styles.dropdownItemText}>None</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity 
+                    style={[styles.dropdownItem, sortBy === 'name' && styles.dropdownItemActive]}
+                    onPress={() => { setSortBy('name'); setShowSortMenu(false); }}
+                  >
+                    <Text style={styles.dropdownItemText}>Name</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity 
+                    style={[styles.dropdownItem, sortBy === 'size' && styles.dropdownItemActive]}
+                    onPress={() => { setSortBy('size'); setShowSortMenu(false); }}
+                  >
+                    <Text style={styles.dropdownItemText}>Size</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity 
+                    style={[styles.dropdownItem, sortBy === 'date' && styles.dropdownItemActive]}
+                    onPress={() => { setSortBy('date'); setShowSortMenu(false); }}
+                  >
+                    <Text style={styles.dropdownItemText}>Date Added</Text>
+                  </TouchableOpacity>
+                </View>
+              )}
+            </View>
           </View>
           <FileCanvas 
             scale={scale}
             translateX={translateX}
             translateY={translateY}
-            files={visibleFiles}
+            files={displayFiles}
             selectedFileIds={selectedFileIds}
+            groupLabels={fileGroups.map(g => ({ label: g.label, position: g.position }))}
             onFileSelect={handleFileSelect}
           />
         </View>
@@ -959,19 +976,47 @@ export default function HomeScreen() {
         {/* Selection Counter */}
         {selectedFileIds.length > 0 && (
           <View style={styles.selectionCounterContainer}>
-            <View style={styles.selectionCounter}>
-              <Text style={styles.selectionCounterText}>
-                {selectedFileIds.length} {selectedFileIds.length === 1 ? 'file' : 'files'} selected
-              </Text>
-            </View>
-          </View>
-        )}
-
-        {/* Toast (temporary) */}
-        {toastVisible && (
-          <View style={styles.toastContainer} pointerEvents="none">
-            <View style={styles.toastBubble}>
-              <Text style={styles.toastText}>{toastMessage}</Text>
+            <View style={styles.selectionCounterWrapper}>
+              <TouchableOpacity 
+                style={styles.selectionCounter}
+                activeOpacity={0.8}
+                onPress={() => setShowSelectionMenu(!showSelectionMenu)}
+              >
+                <Text style={styles.selectionCounterText}>
+                  {selectedFileIds.length} {selectedFileIds.length === 1 ? 'file' : 'files'} selected
+                </Text>
+                <MoreVertical size={16} color="#ffffff" strokeWidth={2.5} />
+              </TouchableOpacity>
+              
+              {/* Selection Context Menu */}
+              {showSelectionMenu && (
+                <View style={styles.selectionDropdownMenu}>
+                  <TouchableOpacity 
+                    style={styles.selectionDropdownItem}
+                    onPress={() => {
+                      clearSelection();
+                      setShowSelectionMenu(false);
+                    }}
+                  >
+                    <Text style={styles.selectionDropdownItemText}>Close</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity 
+                    style={styles.selectionDropdownItem}
+                    onPress={() => {
+                      handleDeleteAction();
+                      setShowSelectionMenu(false);
+                    }}
+                  >
+                    <Text style={styles.selectionDropdownItemText}>Delete</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity 
+                    style={styles.selectionDropdownItem}
+                    onPress={handleGroupSelectedFiles}
+                  >
+                    <Text style={styles.selectionDropdownItemText}>Group</Text>
+                  </TouchableOpacity>
+                </View>
+              )}
             </View>
           </View>
         )}
@@ -1037,49 +1082,6 @@ export default function HomeScreen() {
             ]}>Clear</Text>
           </TouchableOpacity>
         </View>
-
-        {/* Share Modal */}
-        <Modal
-          visible={shareModalVisible}
-          transparent={true}
-          animationType="fade"
-          onRequestClose={closeShareModal}
-        >
-          <View style={styles.shareOverlay}>
-            <View style={styles.shareContent}>
-              <View style={styles.shareHeader}>
-                <Text style={styles.modalTitle}>Share via...</Text>
-                <TouchableOpacity onPress={closeShareModal}>
-                  <Text style={{ color: '#94a3b8', fontSize: 18 }}>✕</Text>
-                </TouchableOpacity>
-              </View>
-
-              {!sentStatus ? (
-                <View style={styles.shareGrid}>
-                  <TouchableOpacity style={styles.shareButton} onPress={() => handleSend('Messenger')}>
-                    <Image source={require('../../assets/icons/dark/Messenger.png')} style={styles.shareIcon} />
-                  </TouchableOpacity>
-
-                  <TouchableOpacity style={styles.shareButton} onPress={() => handleSend('Twitter')}>
-                    <Image source={require('../../assets/icons/dark/Twitter.png')} style={styles.shareIcon} />
-                  </TouchableOpacity>
-
-                  <TouchableOpacity style={styles.shareButton} onPress={() => handleSend('Email')}>
-                    <Image source={require('../../assets/icons/dark/Email.png')} style={styles.shareIcon} />
-                  </TouchableOpacity>
-
-                  <View style={[styles.shareButton, styles.shareButtonDisabled]}>
-                    <Image source={require('../../assets/icons/dark/share.png')} style={[styles.shareIcon, { opacity: 0.4 }]} />
-                  </View>
-                </View>
-              ) : (
-                <View style={{ alignItems: 'center', paddingVertical: 24 }}>
-                  <Text style={styles.sentText}>Sent</Text>
-                </View>
-              )}
-            </View>
-          </View>
-        </Modal>
 
         {/* New Folder Modal */}
         <Modal
@@ -1181,7 +1183,11 @@ const styles = StyleSheet.create({
   canvasHeader: {
     position: 'absolute',
     top: 8,
+    left: 8,
     right: 8,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
     zIndex: 10,
   },
   modalOverlay: {
@@ -1247,12 +1253,17 @@ const styles = StyleSheet.create({
     right: 0,
     flexDirection: 'row',
     justifyContent: 'center',
-    pointerEvents: 'none',
+    pointerEvents: 'box-none',
+  },
+  selectionCounterWrapper: {
+    position: 'relative',
+    pointerEvents: 'auto',
   },
   selectionCounter: {
     backgroundColor: 'rgba(59, 130, 246, 0.95)',
-    paddingHorizontal: 16,
-    paddingVertical: 8,
+    paddingLeft: 16,
+    paddingRight: 12,
+    paddingVertical: 10,
     borderRadius: 20,
     borderWidth: 1,
     borderColor: 'rgba(147, 197, 253, 0.3)',
@@ -1261,11 +1272,99 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.25,
     shadowRadius: 3,
     elevation: 4,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
   },
   selectionCounterText: {
     color: '#ffffff',
     fontSize: 13,
     fontWeight: '600',
+  },
+  selectionDropdownMenu: {
+    position: 'absolute',
+    bottom: '110%',
+    left: '50%',
+    transform: [{ translateX: -70 }],
+    backgroundColor: 'rgba(30, 41, 59, 0.98)',
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: 'rgba(71, 85, 105, 0.5)',
+    minWidth: 140,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: -4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 10,
+    overflow: 'hidden',
+  },
+  selectionDropdownItem: {
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(71, 85, 105, 0.2)',
+  },
+  selectionDropdownItemText: {
+    color: '#e2e8f0',
+    fontSize: 14,
+    fontWeight: '500',
+  },
+  groupSortButtonWrapper: {
+    position: 'relative',
+    zIndex: 100,
+  },
+  groupSortButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 8,
+    backgroundColor: 'rgba(30, 41, 59, 0.8)',
+    borderWidth: 1,
+    borderColor: 'rgba(71, 85, 105, 0.4)',
+  },
+  groupSortButtonActive: {
+    backgroundColor: 'rgba(59, 130, 246, 0.15)',
+    borderColor: 'rgba(59, 130, 246, 0.4)',
+  },
+  groupSortButtonText: {
+    color: '#94a3b8',
+    fontSize: 12,
+    fontWeight: '500',
+  },
+  groupSortButtonTextActive: {
+    color: '#3b82f6',
+  },
+  dropdownMenu: {
+    position: 'absolute',
+    top: '100%',
+    left: 0,
+    marginTop: 4,
+    backgroundColor: 'rgba(30, 41, 59, 0.98)',
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: 'rgba(71, 85, 105, 0.5)',
+    minWidth: 140,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 10,
+    zIndex: 1000,
+  },
+  dropdownItem: {
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(71, 85, 105, 0.2)',
+  },
+  dropdownItemActive: {
+    backgroundColor: 'rgba(59, 130, 246, 0.15)',
+  },
+  dropdownItemText: {
+    color: '#e2e8f0',
+    fontSize: 13,
   },
   actionButtonsContainer: {
     position: 'absolute',
@@ -1313,87 +1412,5 @@ const styles = StyleSheet.create({
   },
   clearButtonText: {
     color: '#fef2f2',
-  },
-
-  /* Share Modal styles */
-  shareOverlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.6)',
-    justifyContent: 'center',
-    alignItems: 'center',
-    paddingHorizontal: 24,
-  },
-  shareContent: {
-    backgroundColor: '#1e293b',
-    borderRadius: 16,
-    padding: 20,
-    width: '85%',
-    maxWidth: 420,
-    alignItems: 'center',
-  },
-  shareHeader: {
-    width: '100%',
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 12,
-  },
-  shareGrid: {
-    width: '100%',
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    justifyContent: 'center',
-  },
-  shareButton: {
-    width: 84,
-    height: 84,
-    borderRadius: 12,
-    backgroundColor: 'rgba(30, 41, 59, 0.8)',
-    justifyContent: 'center',
-    alignItems: 'center',
-    margin: 8,
-  },
-  shareButtonDisabled: {
-    opacity: 0.6,
-  },
-  shareIcon: {
-    width: 48,
-    height: 48,
-    tintColor: '#e2e8f0',
-    resizeMode: 'contain',
-  },
-  sentText: {
-    color: '#10b981',
-    fontSize: 36,
-    fontWeight: '800',
-  },
-
-  /* Toast styles */
-  toastContainer: {
-    position: 'absolute',
-    bottom: 140,
-    left: 0,
-    right: 0,
-    justifyContent: 'center',
-    alignItems: 'center',
-    pointerEvents: 'none',
-  },
-  toastBubble: {
-    backgroundColor: '#f59e0b',
-    paddingHorizontal: 16,
-    paddingVertical: 10,
-    borderRadius: 20,
-    borderWidth: 1,
-    borderColor: 'rgba(0,0,0,0.12)',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.2,
-    shadowRadius: 4,
-    elevation: 4,
-  },
-  toastText: {
-    color: '#07203a',
-    fontSize: 14,
-    fontWeight: '700',
   },
 });

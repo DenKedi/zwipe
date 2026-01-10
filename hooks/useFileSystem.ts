@@ -100,10 +100,13 @@ export function useFileSystem() {
     return files.filter(file => !file.parentId);
   }, [files]);
 
-  const moveFolder = useCallback((folderId: string, parentId?: string | null) => {
-    // parentId undefined => root
-    updateFolder(folderId, { parentId: parentId || undefined });
-  }, [updateFolder]);
+  const moveFolder = useCallback(
+    (folderId: string, parentId?: string | null) => {
+      // parentId undefined => root
+      updateFolder(folderId, { parentId: parentId || undefined });
+    },
+    [updateFolder]
+  );
 
   return {
     files,
