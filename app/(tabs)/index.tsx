@@ -4,13 +4,13 @@ import { FolderStrip } from '@/components/FolderStrip';
 import { ThemedView } from '@/components/themed-view';
 import { ZoneBar, zones } from '@/components/ZoneBar';
 import { useFileSystem } from '@/hooks/useFileSystem';
-import { useActionHistoryStore, createSelectFilesAction, createToggleSelectionAction, createMoveFilesAction, createDeleteFilesAction, FileMoveInfo } from '@/store/actions';
+import { createDeleteFilesAction, createMoveFilesAction, createSelectFilesAction, createToggleSelectionAction, FileMoveInfo, useActionHistoryStore } from '@/store/actions';
 import { useSelectionStore } from '@/store/useSelectionStore';
 import { BreadcrumbSegment, FileSystemItem, ZoneType } from '@/types';
 import { generateRandomFiles } from '@/utils/fileSystemHelpers';
-import { Undo2, Redo2, Eraser } from 'lucide-react-native';
+import { Eraser, Redo2, Undo2 } from 'lucide-react-native';
 import { useCallback, useMemo, useRef, useState } from 'react';
-import { Alert, Modal, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { Alert, Image, Modal, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import Animated, { runOnJS, useAnimatedReaction, useAnimatedStyle, useSharedValue } from 'react-native-reanimated';
 
@@ -46,6 +46,41 @@ export default function HomeScreen() {
   // Folder creation modal
   const [showNewFolderModal, setShowNewFolderModal] = useState(false);
   const [newFolderName, setNewFolderName] = useState('');
+
+  // Share Modal state
+  const [shareModalVisible, setShareModalVisible] = useState(false);
+  const [sentStatus, setSentStatus] = useState(false);
+
+  // Toast state for user notifications
+  const [toastVisible, setToastVisible] = useState(false);
+  const [toastMessage, setToastMessage] = useState('');
+
+  const showToast = useCallback((message: string) => {
+    setToastMessage(message);
+    setToastVisible(true);
+    setTimeout(() => setToastVisible(false), 1500);
+  }, []);
+
+  const showShareModal = useCallback((isFolderShare = false) => {
+    // If this is a drawing-based share and there are no selected files, warn the user
+    if (!isFolderShare && selectedFileIds.length === 0) {
+      showToast('Please select at least one file to share');
+      return;
+    }
+    setShareModalVisible(true);
+  }, [selectedFileIds, showToast]);
+
+  const closeShareModal = useCallback(() => setShareModalVisible(false), []);
+
+  const handleSend = useCallback((method: string) => {
+    // method param reserved for analytics/future branching
+    setSentStatus(true);
+    setTimeout(() => {
+      setSentStatus(false);
+      setShareModalVisible(false);
+      clearSelection();
+    }, 1500);
+  }, [clearSelection]);
   
   // Canvas State
   const scale = useSharedValue(1);
@@ -616,6 +651,9 @@ export default function HomeScreen() {
       if (folderIdToTrash) {
         if (currentZone === 'trash') {
           runOnJS(handleDeleteFolder)(folderIdToTrash);
+        } else if (currentZone === 'share') {
+          // Dragging a folder into Share zone
+          runOnJS(showShareModal)(true);
         }
       } 
       else if (isDrawing.value) {
@@ -632,11 +670,13 @@ export default function HomeScreen() {
           runOnJS(handleDeleteAction)();
         } else if (targetFolderId) {
           runOnJS(handleDropAction)(targetFolderId);
+        } else if (currentZone === 'share') {
+          // Drawing selection dropped onto Share zone
+          runOnJS(showShareModal)(false);
         }
       }
 
       // reset everything
-      isDrawing.value = false;
       draggingFolderId.value = null;
       dropTargetFolderId.value = null;
       hoveredZoneType.value = null;
@@ -769,6 +809,15 @@ export default function HomeScreen() {
           </View>
         )}
 
+        {/* Toast (temporary) */}
+        {toastVisible && (
+          <View style={styles.toastContainer} pointerEvents="none">
+            <View style={styles.toastBubble}>
+              <Text style={styles.toastText}>{toastMessage}</Text>
+            </View>
+          </View>
+        )}
+
         {/* Action Buttons (Bottom) */}
         <View style={styles.actionButtonsContainer}>
           <TouchableOpacity 
@@ -830,6 +879,49 @@ export default function HomeScreen() {
             ]}>Clear</Text>
           </TouchableOpacity>
         </View>
+
+        {/* Share Modal */}
+        <Modal
+          visible={shareModalVisible}
+          transparent={true}
+          animationType="fade"
+          onRequestClose={closeShareModal}
+        >
+          <View style={styles.shareOverlay}>
+            <View style={styles.shareContent}>
+              <View style={styles.shareHeader}>
+                <Text style={styles.modalTitle}>Share via...</Text>
+                <TouchableOpacity onPress={closeShareModal}>
+                  <Text style={{ color: '#94a3b8', fontSize: 18 }}>✕</Text>
+                </TouchableOpacity>
+              </View>
+
+              {!sentStatus ? (
+                <View style={styles.shareGrid}>
+                  <TouchableOpacity style={styles.shareButton} onPress={() => handleSend('Messenger')}>
+                    <Image source={require('../../assets/icons/dark/Messenger.png')} style={styles.shareIcon} />
+                  </TouchableOpacity>
+
+                  <TouchableOpacity style={styles.shareButton} onPress={() => handleSend('Twitter')}>
+                    <Image source={require('../../assets/icons/dark/Twitter.png')} style={styles.shareIcon} />
+                  </TouchableOpacity>
+
+                  <TouchableOpacity style={styles.shareButton} onPress={() => handleSend('Email')}>
+                    <Image source={require('../../assets/icons/dark/Email.png')} style={styles.shareIcon} />
+                  </TouchableOpacity>
+
+                  <View style={[styles.shareButton, styles.shareButtonDisabled]}>
+                    <Image source={require('../../assets/icons/dark/share.png')} style={[styles.shareIcon, { opacity: 0.4 }]} />
+                  </View>
+                </View>
+              ) : (
+                <View style={{ alignItems: 'center', paddingVertical: 24 }}>
+                  <Text style={styles.sentText}>Sent</Text>
+                </View>
+              )}
+            </View>
+          </View>
+        </Modal>
 
         {/* New Folder Modal */}
         <Modal
@@ -1063,5 +1155,87 @@ const styles = StyleSheet.create({
   },
   clearButtonText: {
     color: '#fef2f2',
+  },
+
+  /* Share Modal styles */
+  shareOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.6)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 24,
+  },
+  shareContent: {
+    backgroundColor: '#1e293b',
+    borderRadius: 16,
+    padding: 20,
+    width: '85%',
+    maxWidth: 420,
+    alignItems: 'center',
+  },
+  shareHeader: {
+    width: '100%',
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 12,
+  },
+  shareGrid: {
+    width: '100%',
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'center',
+  },
+  shareButton: {
+    width: 84,
+    height: 84,
+    borderRadius: 12,
+    backgroundColor: 'rgba(30, 41, 59, 0.8)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    margin: 8,
+  },
+  shareButtonDisabled: {
+    opacity: 0.6,
+  },
+  shareIcon: {
+    width: 48,
+    height: 48,
+    tintColor: '#e2e8f0',
+    resizeMode: 'contain',
+  },
+  sentText: {
+    color: '#10b981',
+    fontSize: 36,
+    fontWeight: '800',
+  },
+
+  /* Toast styles */
+  toastContainer: {
+    position: 'absolute',
+    bottom: 140,
+    left: 0,
+    right: 0,
+    justifyContent: 'center',
+    alignItems: 'center',
+    pointerEvents: 'none',
+  },
+  toastBubble: {
+    backgroundColor: '#f59e0b',
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: 'rgba(0,0,0,0.12)',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.2,
+    shadowRadius: 4,
+    elevation: 4,
+  },
+  toastText: {
+    color: '#07203a',
+    fontSize: 14,
+    fontWeight: '700',
   },
 });
