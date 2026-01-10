@@ -4,7 +4,8 @@ import { FolderStrip } from '@/components/FolderStrip';
 import { ThemedView } from '@/components/themed-view';
 import { ZoneBar, zones } from '@/components/ZoneBar';
 import { useFileSystem } from '@/hooks/useFileSystem';
-import { createDeleteFilesAction, createMoveFilesAction, createSelectFilesAction, createToggleSelectionAction, FileMoveInfo, useActionHistoryStore } from '@/store/actions';
+import { createDeleteFilesAction, createMoveFilesAction, createMoveFolderAction, createSelectFilesAction, createToggleSelectionAction, FileMoveInfo, useActionHistoryStore } from '@/store/actions';
+import { useLayoutStore } from '@/store/useLayoutStore';
 import { useSelectionStore } from '@/store/useSelectionStore';
 import { BreadcrumbSegment, FileSystemItem, ZoneType } from '@/types';
 import { generateRandomFiles } from '@/utils/fileSystemHelpers';
@@ -16,7 +17,7 @@ import Animated, { runOnJS, useAnimatedReaction, useAnimatedStyle, useSharedValu
 
 export default function HomeScreen() {
   const [dimensions, setDimensions] = useState({ width: 0, height: 0 });
-  const { files, folders, createFolder, createFile, moveFilesToFolder, deleteFolder } = useFileSystem();
+  const { files, folders, createFolder, createFile, moveFilesToFolder, deleteFolder, moveFolder, getFolderById } = useFileSystem();
   
   // Navigation State
   const [currentFolderId, setCurrentFolderId] = useState<string | null>(null);
@@ -103,8 +104,16 @@ export default function HomeScreen() {
   // Shared Value to hold live selection from UI thread
   const activeSelection = useSharedValue<string[]>([]);
   const canvasLayout = useSharedValue({ x: 0, y: 0, width: 0, height: 0 });
+  const folderStripX = useSharedValue(0);
   const folderStripY = useSharedValue(0);
+  const folderStripHeight = useSharedValue(0);
   const dropTargetFolderId = useSharedValue<string | null>(null);
+  // FolderStrip scrollX shared value for accurate hit-testing (pixels)
+  const folderStripScrollX = useSharedValue(0);
+  // Screen width tracked as shared value so worklets can detect edge proximity
+  const screenWidth = useSharedValue(0);
+  // Autoscroll direction shared value: -1 left, 0 stop, 1 right
+  const autoScrollDir = useSharedValue(0);
 
   // Folder State
   const draggingFolderId = useSharedValue<string | null>(null);
@@ -186,6 +195,16 @@ export default function HomeScreen() {
     setGradientStartColor(defaultGradient.start);
     setGradientEndColor(defaultGradient.end);
   };
+
+  // FolderStrip imperative ref and helpers for autoscroll (used via runOnJS from worklets)
+  const folderStripRef = useRef<any>(null);
+  const startFolderStripAutoScroll = useCallback((dir: number) => {
+    folderStripRef.current?.startAutoScroll?.(dir);
+  }, []);
+  const stopFolderStripAutoScroll = useCallback(() => {
+    folderStripRef.current?.stopAutoScroll?.();
+  }, []);
+
   // -----------------------------------------------------
 
   // Syncs UI-Thread selection with React State only when changed
@@ -221,6 +240,11 @@ export default function HomeScreen() {
     if (folder) {
       setCurrentFolderId(folderId);
       setBreadcrumbs(prev => [...prev, { id: folderId, name: folder.name }]);
+
+      // Reset FolderStrip scroll to the left when navigating into a folder
+      if (folderStripRef.current?.scrollToStart) {
+        folderStripRef.current.scrollToStart();
+      }
     }
   }, [folders]);
 
@@ -345,10 +369,52 @@ export default function HomeScreen() {
     );
   }, [deleteFolder]);
 
+  // Move folder (drag into another folder) with protections against cycles
+  const handleMoveFolder = useCallback((folderId: string, targetId: string) => {
+    if (folderId === targetId) {
+      showToast('Cannot move a folder into itself');
+      return;
+    }
+
+    // Check if target is a descendant of folderId (prevent circular move)
+    let p = getFolderById(targetId);
+    while (p) {
+      if (p.id === folderId) {
+        showToast('Cannot move a folder into one of its sub-folders');
+        return;
+      }
+      if (!p.parentId) break;
+      p = getFolderById(p.parentId);
+    }
+
+    // Valid move - capture previous parent for undo
+    const previousParent = getFolderById(folderId)?.parentId || null;
+    moveFolder(folderId, targetId);
+
+    // Create action for undo/redo
+    const action = createMoveFolderAction(folderId, previousParent, targetId);
+    execute(action);
+
+    showToast('Folder moved');
+  }, [getFolderById, moveFolder, showToast]);
+
   // Move Folder via longpress
   const handleFolderLongPress = useCallback((id: string) => {
     draggingFolderId.value = id;
     isDrawing.value = false;
+
+    // Try to initialize ghost position from registered layout (center of folder card)
+    try {
+      const items = useLayoutStore.getState().getItems();
+      const folderLayout = items.find(it => it.id === id && it.type === 'folder');
+      if (folderLayout) {
+        dragX.value = folderLayout.layout.x + folderLayout.layout.width / 2;
+        dragY.value = folderLayout.layout.y + folderLayout.layout.height / 2;
+      }
+      dropTargetFolderId.value = null;
+    } catch (e) {
+      // ignore
+    }
   }, []);
 
   // Gestures
@@ -487,7 +553,8 @@ export default function HomeScreen() {
     }
 
     // Calculate X position relative to scroll content
-    const xInStrip = x - PADDING_LEFT;
+    // Account for current scroll offset reported by FolderStrip and the strip's X on screen
+    const xInStrip = x - (PADDING_LEFT + folderStripX.value) + folderStripScrollX.value;
     const itemStride = CARD_WIDTH + GAP;
     
     const index = Math.floor(xInStrip / itemStride);
@@ -535,6 +602,13 @@ export default function HomeScreen() {
     .maxPointers(1)
     .onStart((e) => {
       'worklet';
+      // If touch starts inside the FolderStrip, let the ScrollView / touchables handle it
+      if (e.y >= folderStripY.value && e.y <= (folderStripY.value + folderStripHeight.value)) {
+        isDrawing.value = false;
+        // do not initialize drawing state so ScrollView can handle horizontal scrolls and taps
+        return;
+      }
+
       dragX.value = e.x;
       dragY.value = e.y;
       // long press check
@@ -637,7 +711,47 @@ export default function HomeScreen() {
       else if (draggingFolderId.value) {
         dragX.value = e.x;
         dragY.value = e.y;
-        hoveredZoneType.value = checkZoneIntersection(e.x, e.y);
+
+        // Check if hovering over a folder in the strip
+        const folderId = checkFolderIntersection(e.x, e.y, currentFolders);
+        if (folderId) {
+          dropTargetFolderId.value = folderId;
+          hoveredZoneType.value = null;
+        } else {
+          dropTargetFolderId.value = null;
+          hoveredZoneType.value = checkZoneIntersection(e.x, e.y);
+        }
+
+        // Autoscroll detection for FolderStrip (worklet-safe)
+        const EDGE_ZONE = 60; // px from screen edges
+        // Only consider autoscroll when finger is within the FolderStrip vertical bounds
+        if (e.y >= folderStripY.value && e.y <= (folderStripY.value + folderStripHeight.value)) {
+          // Left edge
+          if (e.x <= EDGE_ZONE) {
+            if (autoScrollDir.value !== -1) {
+              autoScrollDir.value = -1;
+              runOnJS(startFolderStripAutoScroll)(-1);
+            }
+          }
+          // Right edge
+          else if (e.x >= (screenWidth.value - EDGE_ZONE)) {
+            if (autoScrollDir.value !== 1) {
+              autoScrollDir.value = 1;
+              runOnJS(startFolderStripAutoScroll)(1);
+            }
+          } else {
+            if (autoScrollDir.value !== 0) {
+              autoScrollDir.value = 0;
+              runOnJS(stopFolderStripAutoScroll)();
+            }
+          }
+        } else {
+          // Not hovering folder strip - ensure autoscroll stopped
+          if (autoScrollDir.value !== 0) {
+            autoScrollDir.value = 0;
+            runOnJS(stopFolderStripAutoScroll)();
+          }
+        }
       }
     })
     .onEnd(() => {
@@ -647,10 +761,13 @@ export default function HomeScreen() {
       const folderIdToTrash = draggingFolderId.value;
       const targetFolderId = dropTargetFolderId.value;
 
-      // delete folder
+      // delete / drop folder
       if (folderIdToTrash) {
         if (currentZone === 'trash') {
           runOnJS(handleDeleteFolder)(folderIdToTrash);
+        } else if (targetFolderId) {
+          // Attempt to drop folder into another folder
+          runOnJS(handleMoveFolder)(folderIdToTrash, targetFolderId);
         } else if (currentZone === 'share') {
           // Dragging a folder into Share zone
           runOnJS(showShareModal)(true);
@@ -680,6 +797,14 @@ export default function HomeScreen() {
       draggingFolderId.value = null;
       dropTargetFolderId.value = null;
       hoveredZoneType.value = null;
+      dragX.value = 0;
+      dragY.value = 0;
+
+      // Ensure autoscroll is stopped
+      if (autoScrollDir.value !== 0) {
+        autoScrollDir.value = 0;
+        runOnJS(stopFolderStripAutoScroll)();
+      }
 
       // Reset gradient colors
       runOnJS(handleResetGradient)();
@@ -705,7 +830,12 @@ export default function HomeScreen() {
     <GestureDetector gesture={composedGesture}>
       <ThemedView 
         style={styles.container} 
-        onLayout={(e) => setDimensions(e.nativeEvent.layout)}
+        onLayout={(e) => {
+          const layout = e.nativeEvent.layout;
+          setDimensions(layout);
+          // Keep shared screen width in sync for worklets
+          screenWidth.value = layout.width;
+        }}
       >
         {/* Header */}
         <View style={styles.headerSection}>
@@ -733,16 +863,24 @@ export default function HomeScreen() {
         <View 
           style={styles.folderSection}
           onLayout={(e) => {
-            folderStripY.value = e.nativeEvent.layout.y;
+            const { x, y, width, height } = e.nativeEvent.layout;
+            folderStripX.value = x;
+            folderStripY.value = y;
+            folderStripHeight.value = height;
           }}
         >
           <FolderStrip 
+            ref={folderStripRef}
             folders={currentFolders}
             onFolderPress={handleFolderPress}
             onNewFolder={handleNewFolder}
             onFolderLongPress={handleFolderLongPress}
             dropTargetFolderId={dropTargetFolderId}
             hoverColor={gradientEndColor}
+            onScrollXChange={(x: number) => {
+              // Update shared value used by worklets
+              folderStripScrollX.value = x;
+            }}
           />
         </View>
 

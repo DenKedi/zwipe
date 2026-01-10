@@ -22,6 +22,7 @@ export enum ActionType {
   DUPLICATE_FILES = 'DUPLICATE_FILES',
   CREATE_FOLDER = 'CREATE_FOLDER',
   DELETE_FOLDER = 'DELETE_FOLDER',
+  MOVE_FOLDER = 'MOVE_FOLDER',
 }
 
 // Helper type for file move tracking

@@ -1,6 +1,6 @@
-import { useCallback, useEffect } from 'react';
-import { FileSystemItem, Folder } from '@/types';
 import { useFileSystemStore } from '@/store/useFileSystemStore';
+import { FileSystemItem, Folder } from '@/types';
+import { useCallback, useEffect } from 'react';
 
 export function useFileSystem() {
   const {
@@ -17,6 +17,8 @@ export function useFileSystem() {
     removeFolder,
     initialize,
     getFilesInFolder,
+    updateFolder,
+    getFolderById,
   } = useFileSystemStore();
 
   // Initialize the store on first use
@@ -98,6 +100,11 @@ export function useFileSystem() {
     return files.filter(file => !file.parentId);
   }, [files]);
 
+  const moveFolder = useCallback((folderId: string, parentId?: string | null) => {
+    // parentId undefined => root
+    updateFolder(folderId, { parentId: parentId || undefined });
+  }, [updateFolder]);
+
   return {
     files,
     folders,
@@ -110,7 +117,9 @@ export function useFileSystem() {
     moveFilesToFolder,
     createFolder,
     deleteFolder,
+    moveFolder,
     getFilesInFolder,
+    getFolderById,
     getVisibleFiles,
   };
 }
