@@ -1,8 +1,8 @@
-import { memo, useEffect } from 'react';
-import { StyleSheet, View, Text, TouchableOpacity } from 'react-native';
-import Animated, { useAnimatedStyle, useSharedValue, withSpring } from 'react-native-reanimated';
 import { FileSystemItem } from '@/types';
-import { FileText, Image as ImageIcon, File, FileSpreadsheet, Film, Music, Archive } from 'lucide-react-native';
+import { Archive, File, FileSpreadsheet, FileText, Film, Image as ImageIcon, Music } from 'lucide-react-native';
+import { memo, useEffect } from 'react';
+import { Image, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import Animated, { useAnimatedStyle, useSharedValue, withSpring } from 'react-native-reanimated';
 
 interface FileItemProps {
   file: FileSystemItem;
@@ -72,11 +72,19 @@ export const FileItem = memo(function FileItem({ file, isSelected, selectionColo
     };
   });
 
-  const truncateFilename = (name: string, maxLength: number = 15) => {
-    if (name.length <= maxLength) return name;
-    const ext = name.split('.').pop();
+  const truncateFilename = (name: string, maxMainChars: number = 8) => {
+    // If there's no extension, do a simple truncate
+    if (!name.includes('.')) {
+      if (name.length <= maxMainChars) return name;
+      return `${name.substring(0, maxMainChars)}...`;
+    }
+
+    const ext = name.split('.').pop()!;
     const nameWithoutExt = name.substring(0, name.lastIndexOf('.'));
-    const truncated = nameWithoutExt.substring(0, maxLength - ext!.length - 4);
+
+    if (nameWithoutExt.length <= maxMainChars) return name;
+
+    const truncated = nameWithoutExt.substring(0, maxMainChars);
     return `${truncated}...${ext}`;
   };
 
@@ -121,7 +129,11 @@ export const FileItem = memo(function FileItem({ file, isSelected, selectionColo
           {/* Preview for images */}
           {(fileExtension === 'jpg' || fileExtension === 'jpeg' || fileExtension === 'png' || fileExtension === 'gif' || fileExtension === 'webp') ? (
             <View style={styles.imagePreview}>
-              {getFileIcon()}
+              {(file as any).asset ? (
+                <Image source={(file as any).asset} style={styles.image} resizeMode="cover" />
+              ) : (
+                getFileIcon()
+              )}
             </View>
           ) : (
             <View style={styles.iconContainer}>{getFileIcon()}</View>
@@ -161,6 +173,12 @@ const styles = StyleSheet.create({
     marginBottom: 4,
     justifyContent: 'center',
     alignItems: 'center',
+    overflow: 'hidden',
+  },
+  image: {
+    width: '100%',
+    height: '100%',
+    borderRadius: 12,
   },
   iconContainer: {
     marginBottom: 4,

@@ -1,3 +1,4 @@
+import { testImages } from '@/assets/testImages';
 import { ActionBar } from '@/components/ActionBar';
 import { DrawingLayer } from '@/components/DrawingLayer';
 import { FileCanvas } from '@/components/FileCanvas';
@@ -24,7 +25,7 @@ import {
   checkFolderIntersection,
   checkZoneIntersection,
 } from '@/utils/canvasIntersection';
-import { generateRandomFiles } from '@/utils/fileSystemHelpers';
+import { assignTestImagesToFiles, generateRandomFiles } from '@/utils/fileSystemHelpers';
 import { useCallback, useMemo, useRef, useState } from 'react';
 import { Alert, ScrollView, Share, Text, TouchableOpacity, View } from 'react-native';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
@@ -296,11 +297,17 @@ export default function HomeScreen() {
 
   // --- Test Files ---
   const handleAddTestFiles = useCallback(() => {
-    const newFiles = generateRandomFiles(5, currentFolderId || undefined, true);
-    newFiles.forEach((file) => {
-      createFile(file.name, file.x, file.y, file.parentId);
+    // Generate test files with random positions (not grid) and bias towards images
+    const newFiles = generateRandomFiles(6, currentFolderId || undefined, false, 0.8);
+
+    // Assign random unique image assets for image files where possible
+    const augmented = assignTestImagesToFiles(newFiles, testImages, files);
+
+    // Create files in the store, passing the asset when present
+    augmented.forEach((file) => {
+      createFile(file.name, file.x, file.y, file.parentId, (file as any).asset);
     });
-  }, [currentFolderId, createFile]);
+  }, [currentFolderId, createFile, files]);
 
   // --- File/Folder Actions ---
   const handleDropAction = useCallback(

@@ -28,19 +28,28 @@ const FOLDER_NAMES = [
 export function generateRandomFile(
   parentId?: string,
   x?: number,
-  y?: number
+  y?: number,
+  name?: string,
+  extension?: string
 ): FileSystemItem {
   const fileType = FILE_TYPES[Math.floor(Math.random() * FILE_TYPES.length)];
   const randomId = Math.random().toString(36).substring(2, 9);
   const randomSize = Math.floor(Math.random() * 5000000) + 1024;
 
+  const ext = extension || fileType.ext;
+  const fileName = name || `${fileType.name}_${randomId.substring(0, 4)}.${ext}`;
+
+  // Spawn randomly around a loose origin area to avoid perfect overlap
+  const randomX = x ?? Math.floor(Math.random() * 800) + 50;
+  const randomY = y ?? Math.floor(Math.random() * 600) + 50;
+
   return {
     id: `file-${Date.now()}-${randomId}`,
-    name: `${fileType.name}_${randomId.substring(0, 4)}.${fileType.ext}`,
+    name: fileName.includes('.') ? fileName : `${fileName}.${ext}`,
     type: 'file',
-    extension: fileType.ext,
-    x: x ?? Math.floor(Math.random() * 800) + 50,
-    y: y ?? Math.floor(Math.random() * 600) + 50,
+    extension: ext,
+    x: randomX,
+    y: randomY,
     parentId,
     size: randomSize,
     createdAt: new Date(),
@@ -54,9 +63,17 @@ export function generateRandomFile(
 export function generateRandomFiles(
   count: number,
   parentId?: string,
-  gridLayout: boolean = false
+  gridLayout: boolean = false,
+  imageProbability: number = 0.2 // chance a generated file will be an image
 ): FileSystemItem[] {
   const files: FileSystemItem[] = [];
+  const IMAGE_EXTS = ['jpg', 'jpeg', 'png', 'gif', 'webp'];
+
+  const makeFileWithExt = (ext: string, x?: number, y?: number) => {
+    const randomId = Math.random().toString(36).substring(2, 9);
+    const name = `TestImage_${randomId}.${ext}`;
+    return generateRandomFile(parentId, x, y, name, ext);
+  };
 
   if (gridLayout) {
     // Generate files in a grid layout
@@ -71,12 +88,24 @@ export function generateRandomFiles(
       const x = startX + col * spacing;
       const y = startY + row * spacing;
 
-      files.push(generateRandomFile(parentId, x, y));
+      // Respect imageProbability
+      if (Math.random() < imageProbability) {
+        const ext = IMAGE_EXTS[Math.floor(Math.random() * IMAGE_EXTS.length)];
+        files.push(makeFileWithExt(ext, x, y));
+      } else {
+        files.push(generateRandomFile(parentId, x, y));
+      }
     }
   } else {
-    // Generate files with random positions
+    // Generate files with random positions around the origin (not fixed grid)
+    // This reduces exact overlap when spawning multiple times
     for (let i = 0; i < count; i++) {
-      files.push(generateRandomFile(parentId));
+      if (Math.random() < imageProbability) {
+        const ext = IMAGE_EXTS[Math.floor(Math.random() * IMAGE_EXTS.length)];
+        files.push(makeFileWithExt(ext));
+      } else {
+        files.push(generateRandomFile(parentId));
+      }
     }
   }
 
@@ -164,4 +193,43 @@ export function getFileTypeConfig(extension: string) {
   };
 
   return configs[extension.toLowerCase()] || { name: 'File', color: '#64748b' };
+}
+
+/**
+ * Assign random image assets to image files from a provided asset pool.
+ * Ensures no duplicate assets are assigned if existingFiles already use some assets.
+ */
+export function assignTestImagesToFiles(
+  files: FileSystemItem[],
+  imageAssets: any[],
+  existingFiles: FileSystemItem[] = []
+): FileSystemItem[] {
+  // Build set of already used asset URIs to avoid duplicates
+  const usedAssets = new Set<number | string>();
+  existingFiles.forEach((f) => {
+    if ((f as any).asset) usedAssets.add((f as any).asset);
+  });
+
+  // Pool of available assets not yet used
+  const available = imageAssets.filter((a) => !usedAssets.has(a));
+
+  // Shuffle available assets
+  const shuffled = available.slice().sort(() => Math.random() - 0.5);
+
+  let idx = 0;
+
+  return files.map((f) => {
+    const ext = f.extension?.toLowerCase();
+    if (ext === 'jpg' || ext === 'jpeg' || ext === 'png' || ext === 'gif' || ext === 'webp') {
+      // If we have shuffled assets left, assign one uniquely
+      if (idx < shuffled.length) {
+        const asset = shuffled[idx++];
+        return { ...f, asset };
+      }
+      // Otherwise, fallback to random (may duplicate)
+      const randomAsset = imageAssets[Math.floor(Math.random() * imageAssets.length)];
+      return { ...f, asset: randomAsset };
+    }
+    return f;
+  });
 }

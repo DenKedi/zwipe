@@ -12,6 +12,8 @@ export interface FileSystemItem {
   parentId?: string;
   extension?: string;
   size?: number;
+  // Optional asset for image thumbnails (require() return type)
+  asset?: any;
   createdAt: Date;
   modifiedAt: Date;
 }

@@ -29,7 +29,7 @@ export function useFileSystem() {
   }, [initialized, initialize]);
 
   const createFile = useCallback(
-    (name: string, x: number, y: number, parentId?: string) => {
+    (name: string, x: number, y: number, parentId?: string, asset?: any) => {
       const newFile: FileSystemItem = {
         id: `file-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`,
         name,
@@ -38,6 +38,7 @@ export function useFileSystem() {
         x,
         y,
         parentId,
+        asset,
         size: 0,
         createdAt: new Date(),
         modifiedAt: new Date(),
