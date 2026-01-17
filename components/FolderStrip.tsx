@@ -3,12 +3,20 @@ import { useLayoutStore } from '@/store/useLayoutStore';
 import { Folder } from '@/types';
 import { Folder as FolderIcon, Plus } from 'lucide-react-native';
 import React, { forwardRef, memo, useImperativeHandle, useMemo } from 'react';
-import { Image, LayoutChangeEvent, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import {
+    Image,
+    LayoutChangeEvent,
+    ScrollView,
+    StyleSheet,
+    Text,
+    TouchableOpacity,
+    View,
+} from 'react-native';
 import Animated, {
-  SharedValue,
-  useAnimatedStyle,
-  useDerivedValue,
-  withSpring
+    SharedValue,
+    useAnimatedStyle,
+    useDerivedValue,
+    withSpring,
 } from 'react-native-reanimated';
 import { ThemedView } from './themed-view';
 
@@ -31,35 +39,49 @@ interface FolderStats {
 }
 
 // Memoized folder card component with hover animation
-const FolderCard = memo(function FolderCard({ 
-  folder, 
+const FolderCard = memo(function FolderCard({
+  folder,
   stats,
   onPress,
   onLongPress,
   isDropTarget,
   hoverColor = '#f865c4',
-}: { 
-  folder: Folder; 
+}: {
+  folder: Folder;
   stats: FolderStats;
   onPress: () => void;
   onLongPress: (id: string) => void;
   isDropTarget: SharedValue<boolean>;
   hoverColor?: string;
 }) {
-  const registerItem = useLayoutStore((s) => s.registerItem);
+  const registerItem = useLayoutStore(s => s.registerItem);
 
   // Animated styles for hover effect
   const animatedContainerStyle = useAnimatedStyle(() => {
     const isHovered = isDropTarget.value;
     return {
       transform: [
-        { scale: withSpring(isHovered ? 1.05 : 1, { damping: 20, stiffness: 180 }) },
+        {
+          scale: withSpring(isHovered ? 1.05 : 1, {
+            damping: 20,
+            stiffness: 180,
+          }),
+        },
       ],
       borderColor: isHovered ? hoverColor : '#fbbf24',
-      borderWidth: withSpring(isHovered ? 3 : 1.5, { damping: 20, stiffness: 180 }),
+      borderWidth: withSpring(isHovered ? 3 : 1.5, {
+        damping: 20,
+        stiffness: 180,
+      }),
       shadowColor: isHovered ? hoverColor : 'transparent',
-      shadowOpacity: withSpring(isHovered ? 0.5 : 0, { damping: 20, stiffness: 180 }),
-      shadowRadius: withSpring(isHovered ? 10 : 0, { damping: 20, stiffness: 180 }),
+      shadowOpacity: withSpring(isHovered ? 0.5 : 0, {
+        damping: 20,
+        stiffness: 180,
+      }),
+      shadowRadius: withSpring(isHovered ? 10 : 0, {
+        damping: 20,
+        stiffness: 180,
+      }),
       shadowOffset: { width: 0, height: 0 },
     };
   });
@@ -67,7 +89,7 @@ const FolderCard = memo(function FolderCard({
   return (
     <Animated.View
       style={[styles.folderCard, animatedContainerStyle]}
-      onLayout={(e) => registerItem(folder.id, 'folder', e.nativeEvent.layout)}
+      onLayout={e => registerItem(folder.id, 'folder', e.nativeEvent.layout)}
     >
       <TouchableOpacity
         style={styles.folderCardInner}
@@ -76,7 +98,7 @@ const FolderCard = memo(function FolderCard({
         activeOpacity={0.7}
       >
         <View style={styles.folderHeader}>
-          <FolderIcon size={20} color="#fbbf24" fill="#fbbf24" />
+          <FolderIcon size={20} color='#fbbf24' fill='#fbbf24' />
           <Text style={styles.folderName} numberOfLines={1}>
             {folder.name}
           </Text>
@@ -100,231 +122,303 @@ const FolderCard = memo(function FolderCard({
   );
 });
 
-export const FolderStrip = memo(forwardRef(function FolderStrip(
-  { folders, onFolderPress, onNewFolder, onFolderLongPress, dropTargetFolderId, hoverColor = '#f865c4', onScrollXChange }: FolderStripProps,
-  ref: any
-) {
-  const registerItem = useLayoutStore((state) => state.registerItem);
-  const allFiles = useFileSystemStore((state) => state.files);
-  const allFolders = useFileSystemStore((state) => state.folders);
+export const FolderStrip = memo(
+  forwardRef(function FolderStrip(
+    {
+      folders,
+      onFolderPress,
+      onNewFolder,
+      onFolderLongPress,
+      dropTargetFolderId,
+      hoverColor = '#f865c4',
+      onScrollXChange,
+    }: FolderStripProps,
+    ref: any,
+  ) {
+    const registerItem = useLayoutStore(state => state.registerItem);
+    const allFiles = useFileSystemStore(state => state.files);
+    const allFolders = useFileSystemStore(state => state.folders);
 
-  const scrollRef = React.useRef<ScrollView | null>(null);
-  const lastOffsetRef = React.useRef(0);
-  const autoScrollRef = React.useRef<number | null>(null);
+    const scrollRef = React.useRef<ScrollView | null>(null);
+    const lastOffsetRef = React.useRef(0);
+    const autoScrollRef = React.useRef<number | null>(null);
 
-  const [contentWidth, setContentWidth] = React.useState(0);
-  const [containerWidth, setContainerWidth] = React.useState(0);
-  const [showRightArrow, setShowRightArrow] = React.useState(false);
-  const [showLeftArrow, setShowLeftArrow] = React.useState(false);
-  const [rightUsed, setRightUsed] = React.useState(false);
+    const [contentWidth, setContentWidth] = React.useState(0);
+    const [containerWidth, setContainerWidth] = React.useState(0);
+    const [showRightArrow, setShowRightArrow] = React.useState(false);
+    const [showLeftArrow, setShowLeftArrow] = React.useState(false);
+    const [rightUsed, setRightUsed] = React.useState(false);
 
-  // Calculate folder statistics
-  const folderStats = useMemo(() => {
-    const stats = new Map<string, FolderStats>();
+    // Calculate folder statistics
+    const folderStats = useMemo(() => {
+      const stats = new Map<string, FolderStats>();
 
-    const calculateStats = (folderId: string): FolderStats => {
-      if (stats.has(folderId)) return stats.get(folderId)!;
+      const calculateStats = (folderId: string): FolderStats => {
+        if (stats.has(folderId)) return stats.get(folderId)!;
 
-      const directFiles = allFiles.filter(f => f.parentId === folderId).length;
-      const directFolders = allFolders.filter(f => f.parentId === folderId);
+        const directFiles = allFiles.filter(
+          f => f.parentId === folderId,
+        ).length;
+        const directFolders = allFolders.filter(f => f.parentId === folderId);
 
-      let totalFiles = directFiles;
-      let totalFolders = directFolders.length;
+        let totalFiles = directFiles;
+        let totalFolders = directFolders.length;
 
-      for (const subFolder of directFolders) {
-        const subStats = calculateStats(subFolder.id);
-        totalFiles += subStats.totalFiles;
-        totalFolders += subStats.totalFolders;
-      }
+        for (const subFolder of directFolders) {
+          const subStats = calculateStats(subFolder.id);
+          totalFiles += subStats.totalFiles;
+          totalFolders += subStats.totalFolders;
+        }
 
-      const result = { directFolders: directFolders.length, totalFolders, directFiles, totalFiles };
-      stats.set(folderId, result);
-      return result;
+        const result = {
+          directFolders: directFolders.length,
+          totalFolders,
+          directFiles,
+          totalFiles,
+        };
+        stats.set(folderId, result);
+        return result;
+      };
+
+      folders.forEach(folder => calculateStats(folder.id));
+      return stats;
+    }, [folders, allFiles, allFolders]);
+
+    useImperativeHandle(
+      ref,
+      () => ({
+        scrollBy: (dx: number) => {
+          const sv: any = scrollRef.current;
+          if (!sv) return;
+          const newX = Math.max(0, (lastOffsetRef.current || 0) + dx);
+          sv.scrollTo({ x: newX, animated: true });
+          lastOffsetRef.current = newX;
+          if (typeof onScrollXChange === 'function') onScrollXChange(newX);
+        },
+        scrollTo: (x: number) => {
+          const sv: any = scrollRef.current;
+          if (!sv) return;
+          const maxX = Math.max(0, contentWidth - containerWidth);
+          const newX = Math.min(Math.max(0, x), maxX);
+          sv.scrollTo({ x: newX, animated: true });
+          lastOffsetRef.current = newX;
+          if (typeof onScrollXChange === 'function') onScrollXChange(newX);
+          setShowLeftArrow(newX > 0 || rightUsed);
+          setShowRightArrow(
+            contentWidth > containerWidth &&
+              newX + containerWidth < contentWidth,
+          );
+        },
+        scrollToStart: () => {
+          const sv: any = scrollRef.current;
+          if (!sv) return;
+          const newX = 0;
+          sv.scrollTo({ x: newX, animated: true });
+          lastOffsetRef.current = newX;
+          if (typeof onScrollXChange === 'function') onScrollXChange(newX);
+          setShowLeftArrow(false);
+          setShowRightArrow(
+            contentWidth > containerWidth &&
+              newX + containerWidth < contentWidth,
+          );
+        },
+        startAutoScroll: (dir: number) => {
+          if (autoScrollRef.current) {
+            clearInterval(autoScrollRef.current);
+            autoScrollRef.current = null;
+          }
+          autoScrollRef.current = setInterval(() => {
+            const sv: any = scrollRef.current;
+            if (!sv) return;
+            const maxX = Math.max(0, contentWidth - containerWidth);
+            const step = Math.max(8, Math.round(containerWidth * 0.06));
+            let newX = (lastOffsetRef.current || 0) + dir * step;
+            newX = Math.min(Math.max(0, newX), maxX);
+            sv.scrollTo({ x: newX, animated: false });
+            lastOffsetRef.current = newX;
+            if (dir === 1) setRightUsed(true);
+            setShowLeftArrow(newX > 0 || rightUsed);
+            setShowRightArrow(
+              contentWidth > containerWidth &&
+                newX + containerWidth < contentWidth,
+            );
+            if (typeof onScrollXChange === 'function') onScrollXChange(newX);
+          }, 80) as unknown as number;
+        },
+        stopAutoScroll: () => {
+          if (autoScrollRef.current) {
+            clearInterval(autoScrollRef.current);
+            autoScrollRef.current = null;
+          }
+        },
+      }),
+      [contentWidth, containerWidth, rightUsed],
+    );
+
+    React.useEffect(() => {
+      setShowRightArrow(contentWidth > containerWidth || folders.length >= 4);
+    }, [contentWidth, containerWidth, folders.length]);
+
+    const handleContentSizeChange = (w: number) => {
+      setContentWidth(w);
+      setShowRightArrow(w > containerWidth || folders.length >= 4);
     };
 
-    folders.forEach(folder => calculateStats(folder.id));
-    return stats;
-  }, [folders, allFiles, allFolders]);
+    const handleLayout = (e: LayoutChangeEvent) =>
+      setContainerWidth(e.nativeEvent.layout.width);
 
-  useImperativeHandle(ref, () => ({
-    scrollBy: (dx: number) => {
+    const handleScroll = (e: any) => {
+      const x = e.nativeEvent.contentOffset.x;
+      lastOffsetRef.current = x;
+      // Inform parent of scroll delta for accurate hit-testing
+      if (typeof onScrollXChange === 'function') {
+        onScrollXChange(x);
+      }
+      setShowLeftArrow(x > 0 || rightUsed);
+      setShowRightArrow(
+        contentWidth > containerWidth && x + containerWidth < contentWidth,
+      );
+    };
+
+    const onPressRight = () => {
       const sv: any = scrollRef.current;
       if (!sv) return;
-      const newX = Math.max(0, (lastOffsetRef.current || 0) + dx);
+      const newX = Math.min(
+        contentWidth - containerWidth,
+        (lastOffsetRef.current || 0) + Math.round(containerWidth * 0.6),
+      );
       sv.scrollTo({ x: newX, animated: true });
       lastOffsetRef.current = newX;
-      if (typeof onScrollXChange === 'function') onScrollXChange(newX);
-    },
-    scrollTo: (x: number) => {
+      setRightUsed(true);
+      setShowLeftArrow(true);
+      setShowRightArrow(newX + containerWidth < contentWidth);
+    };
+
+    const onPressLeft = () => {
       const sv: any = scrollRef.current;
       if (!sv) return;
-      const maxX = Math.max(0, contentWidth - containerWidth);
-      const newX = Math.min(Math.max(0, x), maxX);
+      const newX = Math.max(
+        0,
+        (lastOffsetRef.current || 0) - Math.round(containerWidth * 0.6),
+      );
       sv.scrollTo({ x: newX, animated: true });
       lastOffsetRef.current = newX;
-      if (typeof onScrollXChange === 'function') onScrollXChange(newX);
+      setShowRightArrow(
+        contentWidth > containerWidth && newX + containerWidth < contentWidth,
+      );
       setShowLeftArrow(newX > 0 || rightUsed);
-      setShowRightArrow(contentWidth > containerWidth && newX + containerWidth < contentWidth);
-    },
-    scrollToStart: () => {
-      const sv: any = scrollRef.current;
-      if (!sv) return;
-      const newX = 0;
-      sv.scrollTo({ x: newX, animated: true });
-      lastOffsetRef.current = newX;
-      if (typeof onScrollXChange === 'function') onScrollXChange(newX);
-      setShowLeftArrow(false);
-      setShowRightArrow(contentWidth > containerWidth && newX + containerWidth < contentWidth);
-    },
-    startAutoScroll: (dir: number) => {
-      if (autoScrollRef.current) {
-        clearInterval(autoScrollRef.current);
-        autoScrollRef.current = null;
-      }
-      autoScrollRef.current = setInterval(() => {
-        const sv: any = scrollRef.current;
-        if (!sv) return;
-        const maxX = Math.max(0, contentWidth - containerWidth);
-        const step = Math.max(8, Math.round(containerWidth * 0.06));
-        let newX = (lastOffsetRef.current || 0) + dir * step;
-        newX = Math.min(Math.max(0, newX), maxX);
-        sv.scrollTo({ x: newX, animated: false });
-        lastOffsetRef.current = newX;
-        if (dir === 1) setRightUsed(true);
-        setShowLeftArrow(newX > 0 || rightUsed);
-        setShowRightArrow(contentWidth > containerWidth && newX + containerWidth < contentWidth);
-        if (typeof onScrollXChange === 'function') onScrollXChange(newX);
-      }, 80) as unknown as number;
-    },
-    stopAutoScroll: () => {
-      if (autoScrollRef.current) {
-        clearInterval(autoScrollRef.current);
-        autoScrollRef.current = null;
-      }
-    }
-  }), [contentWidth, containerWidth, rightUsed]);
+    };
 
-  React.useEffect(() => {
-    setShowRightArrow(contentWidth > containerWidth || folders.length >= 4);
-  }, [contentWidth, containerWidth, folders.length]);
-
-  const handleContentSizeChange = (w: number) => {
-    setContentWidth(w);
-    setShowRightArrow(w > containerWidth || folders.length >= 4);
-  };
-
-  const handleLayout = (e: LayoutChangeEvent) => setContainerWidth(e.nativeEvent.layout.width);
-
-  const handleScroll = (e: any) => {
-    const x = e.nativeEvent.contentOffset.x;
-    lastOffsetRef.current = x;
-    // Inform parent of scroll delta for accurate hit-testing
-    if (typeof onScrollXChange === 'function') {
-      onScrollXChange(x);
-    }
-    setShowLeftArrow(x > 0 || rightUsed);
-    setShowRightArrow(contentWidth > containerWidth && x + containerWidth < contentWidth);
-  };
-
-  const onPressRight = () => {
-    const sv: any = scrollRef.current;
-    if (!sv) return;
-    const newX = Math.min(contentWidth - containerWidth, (lastOffsetRef.current || 0) + Math.round(containerWidth * 0.6));
-    sv.scrollTo({ x: newX, animated: true });
-    lastOffsetRef.current = newX;
-    setRightUsed(true);
-    setShowLeftArrow(true);
-    setShowRightArrow(newX + containerWidth < contentWidth);
-  };
-
-  const onPressLeft = () => {
-    const sv: any = scrollRef.current;
-    if (!sv) return;
-    const newX = Math.max(0, (lastOffsetRef.current || 0) - Math.round(containerWidth * 0.6));
-    sv.scrollTo({ x: newX, animated: true });
-    lastOffsetRef.current = newX;
-    setShowRightArrow(contentWidth > containerWidth && newX + containerWidth < contentWidth);
-    setShowLeftArrow(newX > 0 || rightUsed);
-  };
-
-  return (
-    <ThemedView 
-      style={styles.container} 
-      onLayout={(e) => {
-        registerItem('folder-strip', 'zone', e.nativeEvent.layout, 'folder-strip');
-      }}
-    >
-      {/* Folder List with New Button */}
-      <View style={styles.folderHeader2}>
-        <TouchableOpacity style={styles.newButton} onPress={onNewFolder}>
-          <Plus size={16} color="#3b82f6" />
-          <Text style={styles.newButtonText}>New</Text>
-        </TouchableOpacity>
-        {folders.length > 0 && (
-          <View style={styles.folderCount}>
-            <FolderIcon size={14} color="#64748b" />
-            <Text style={styles.folderCountText}>{folders.length}</Text>
-          </View>
-        )}
-      </View>
-
-      <View style={styles.stripContainer} onLayout={handleLayout}>
-        {showLeftArrow && (
-          <TouchableOpacity style={styles.leftArrow} onPress={onPressLeft} onPressIn={() => (ref as any)?.current?.startAutoScroll?.(-1)} onPressOut={() => (ref as any)?.current?.stopAutoScroll?.()}>
-            <Image source={require('../assets/icons/light/arrow_left.png')} style={styles.arrowIcon} />
+    return (
+      <ThemedView
+        style={styles.container}
+        onLayout={e => {
+          registerItem(
+            'folder-strip',
+            'zone',
+            e.nativeEvent.layout,
+            'folder-strip',
+          );
+        }}
+      >
+        {/* Folder List with New Button */}
+        <View style={styles.folderHeader2}>
+          <TouchableOpacity style={styles.newButton} onPress={onNewFolder}>
+            <Plus size={16} color='#3b82f6' />
+            <Text style={styles.newButtonText}>New</Text>
           </TouchableOpacity>
-        )}
-
-        {/* Folder List */}
-        <ScrollView 
-          ref={scrollRef}
-          horizontal 
-          showsHorizontalScrollIndicator={true}
-          persistentScrollbar={true}
-          contentContainerStyle={styles.folderScroll}
-          style={styles.scrollView}
-          onContentSizeChange={(w, h) => handleContentSizeChange(w)}
-          onScroll={handleScroll}
-          scrollEventThrottle={16}
-          keyboardShouldPersistTaps="handled"
-        >
-          {folders.length === 0 ? (
-            <View style={styles.emptyState}>
-              <Text style={styles.emptyText}>No folders yet</Text>
+          {folders.length > 0 && (
+            <View style={styles.folderCount}>
+              <FolderIcon size={14} color='#64748b' />
+              <Text style={styles.folderCountText}>{folders.length}</Text>
             </View>
-          ) : (
-            folders.map((folder) => (
-              <FolderCardWrapper
-                key={folder.id}
-                folder={folder}
-                stats={folderStats.get(folder.id) || { directFolders: 0, totalFolders: 0, directFiles: 0, totalFiles: 0 }}
-                onPress={() => onFolderPress(folder.id)}
-                onLongPress={onFolderLongPress}
-                dropTargetFolderId={dropTargetFolderId}
-                hoverColor={hoverColor}
+          )}
+        </View>
+
+        <View style={styles.stripContainer} onLayout={handleLayout}>
+          {showLeftArrow && (
+            <TouchableOpacity
+              style={styles.leftArrow}
+              onPress={onPressLeft}
+              onPressIn={() => (ref as any)?.current?.startAutoScroll?.(-1)}
+              onPressOut={() => (ref as any)?.current?.stopAutoScroll?.()}
+            >
+              <Image
+                source={require('../assets/icons/light/arrow_left.png')}
+                style={styles.arrowIcon}
               />
-            ))
+            </TouchableOpacity>
           )}
 
-          <TouchableOpacity style={styles.newFolderCard} onPress={onNewFolder}>
-            <View style={styles.newFolderInner}>
-              <Plus size={18} color="#64748b" />
-              <Text style={styles.newFolderText}>New folder</Text>
-            </View>
-          </TouchableOpacity>
-        </ScrollView>
+          {/* Folder List */}
+          <ScrollView
+            ref={scrollRef}
+            horizontal
+            showsHorizontalScrollIndicator={true}
+            persistentScrollbar={true}
+            contentContainerStyle={styles.folderScroll}
+            style={styles.scrollView}
+            onContentSizeChange={(w, h) => handleContentSizeChange(w)}
+            onScroll={handleScroll}
+            scrollEventThrottle={16}
+            keyboardShouldPersistTaps='handled'
+            nestedScrollEnabled={true}
+            scrollEnabled={true}
+          >
+            {folders.length === 0 ? (
+              <View style={styles.emptyState}>
+                <Text style={styles.emptyText}>No folders yet</Text>
+              </View>
+            ) : (
+              folders.map(folder => (
+                <FolderCardWrapper
+                  key={folder.id}
+                  folder={folder}
+                  stats={
+                    folderStats.get(folder.id) || {
+                      directFolders: 0,
+                      totalFolders: 0,
+                      directFiles: 0,
+                      totalFiles: 0,
+                    }
+                  }
+                  onPress={() => onFolderPress(folder.id)}
+                  onLongPress={onFolderLongPress}
+                  dropTargetFolderId={dropTargetFolderId}
+                  hoverColor={hoverColor}
+                />
+              ))
+            )}
 
-        {(showRightArrow) && (
-          <TouchableOpacity style={styles.rightArrow} onPress={onPressRight} onPressIn={() => (ref as any)?.current?.startAutoScroll?.(1)} onPressOut={() => (ref as any)?.current?.stopAutoScroll?.()}>
-            <Image source={require('../assets/icons/light/arrow_right.png')} style={styles.arrowIcon} />
-          </TouchableOpacity>
-        )}
-      </View>
-    </ThemedView>
-  );
-}));
+            <TouchableOpacity
+              style={styles.newFolderCard}
+              onPress={onNewFolder}
+            >
+              <View style={styles.newFolderInner}>
+                <Plus size={18} color='#64748b' />
+                <Text style={styles.newFolderText}>New folder</Text>
+              </View>
+            </TouchableOpacity>
+          </ScrollView>
 
-
+          {showRightArrow && (
+            <TouchableOpacity
+              style={styles.rightArrow}
+              onPress={onPressRight}
+              onPressIn={() => (ref as any)?.current?.startAutoScroll?.(1)}
+              onPressOut={() => (ref as any)?.current?.stopAutoScroll?.()}
+            >
+              <Image
+                source={require('../assets/icons/light/arrow_right.png')}
+                style={styles.arrowIcon}
+              />
+            </TouchableOpacity>
+          )}
+        </View>
+      </ThemedView>
+    );
+  }),
+);
 
 // Wrapper component to create derived value for each folder
 const FolderCardWrapper = memo(function FolderCardWrapper({
@@ -527,4 +621,3 @@ const styles = StyleSheet.create({
     fontSize: 12,
   },
 });
-

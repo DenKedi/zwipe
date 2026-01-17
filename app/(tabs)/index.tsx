@@ -8,32 +8,42 @@ import { ThemedView } from '@/components/themed-view';
 import { ZoneBar } from '@/components/ZoneBar';
 import { useFileSystem } from '@/hooks/useFileSystem';
 import {
-  createDeleteFilesAction,
-  createMoveFilesAction,
-  createMoveFolderAction,
-  createSelectFilesAction,
-  createToggleSelectionAction,
-  FileMoveInfo,
-  useActionHistoryStore,
+    createDeleteFilesAction,
+    createMoveFilesAction,
+    createMoveFolderAction,
+    createSelectFilesAction,
+    createToggleSelectionAction,
+    FileMoveInfo,
+    useActionHistoryStore,
 } from '@/store/actions';
 import { useLayoutStore } from '@/store/useLayoutStore';
 import { useSelectionStore } from '@/store/useSelectionStore';
 import { BreadcrumbSegment, ZoneType } from '@/types';
 import {
-  buildSmoothPath,
-  calculateIntersectedIds,
-  checkFolderIntersection,
-  checkZoneIntersection,
+    buildSmoothPath,
+    calculateIntersectedIds,
+    checkFolderIntersection,
+    checkZoneIntersection,
 } from '@/utils/canvasIntersection';
-import { assignTestImagesToFiles, generateRandomFiles } from '@/utils/fileSystemHelpers';
+import {
+    assignTestImagesToFiles,
+    generateRandomFiles,
+} from '@/utils/fileSystemHelpers';
 import { useCallback, useMemo, useRef, useState } from 'react';
-import { Alert, ScrollView, Share, Text, TouchableOpacity, View } from 'react-native';
+import {
+    Alert,
+    ScrollView,
+    Share,
+    Text,
+    TouchableOpacity,
+    View,
+} from 'react-native';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import Animated, {
-  runOnJS,
-  useAnimatedReaction,
-  useAnimatedStyle,
-  useSharedValue,
+    runOnJS,
+    useAnimatedReaction,
+    useAnimatedStyle,
+    useSharedValue,
 } from 'react-native-reanimated';
 import { styles } from './_index.styles';
 
@@ -81,7 +91,7 @@ export default function HomeScreen() {
 
   const selectedFileIds = useMemo(
     () => [...selectedIds, ...pendingIds],
-    [selectedIds, pendingIds]
+    [selectedIds, pendingIds],
   );
 
   // Modal State
@@ -93,7 +103,9 @@ export default function HomeScreen() {
   const [toastMessage, setToastMessage] = useState('');
 
   // Gradient Colors
-  const [gradientStartColor, setGradientStartColor] = useState(defaultGradient.start);
+  const [gradientStartColor, setGradientStartColor] = useState(
+    defaultGradient.start,
+  );
   const [gradientEndColor, setGradientEndColor] = useState(defaultGradient.end);
 
   // Canvas SharedValues
@@ -147,18 +159,20 @@ export default function HomeScreen() {
   // Memoized visible items
   const visibleFiles = useMemo(
     () =>
-      files.filter((file) =>
-        currentFolderId ? file.parentId === currentFolderId : !file.parentId
+      files.filter(file =>
+        currentFolderId ? file.parentId === currentFolderId : !file.parentId,
       ),
-    [files, currentFolderId]
+    [files, currentFolderId],
   );
 
   const currentFolders = useMemo(
     () =>
-      folders.filter((folder) =>
-        currentFolderId ? folder.parentId === currentFolderId : !folder.parentId
+      folders.filter(folder =>
+        currentFolderId
+          ? folder.parentId === currentFolderId
+          : !folder.parentId,
       ),
-    [folders, currentFolderId]
+    [folders, currentFolderId],
   );
 
   // --- Toast ---
@@ -199,7 +213,7 @@ export default function HomeScreen() {
       const isCurrentlySelected = selectedIds.includes(fileId);
 
       if (isCurrentlySelected) {
-        setSelectedIds(selectedIds.filter((id) => id !== fileId));
+        setSelectedIds(selectedIds.filter(id => id !== fileId));
       } else {
         setSelectedIds([...selectedIds, fileId]);
       }
@@ -207,11 +221,11 @@ export default function HomeScreen() {
       const action = createToggleSelectionAction(
         fileId,
         isCurrentlySelected,
-        previousSelection
+        previousSelection,
       );
       execute(action);
     },
-    [selectedIds, setSelectedIds, execute]
+    [selectedIds, setSelectedIds, execute],
   );
 
   // --- Folder Autoscroll ---
@@ -226,25 +240,25 @@ export default function HomeScreen() {
   // --- Navigation Handlers ---
   const handleFolderPress = useCallback(
     (folderId: string) => {
-      const folder = folders.find((f) => f.id === folderId);
+      const folder = folders.find(f => f.id === folderId);
       if (folder) {
         setCurrentFolderId(folderId);
-        setBreadcrumbs((prev) => [...prev, { id: folderId, name: folder.name }]);
+        setBreadcrumbs(prev => [...prev, { id: folderId, name: folder.name }]);
         folderStripRef.current?.scrollToStart?.();
       }
     },
-    [folders]
+    [folders],
   );
 
   const handleBreadcrumbPress = useCallback(
     (folderId: string) => {
-      const index = breadcrumbs.findIndex((b) => b.id === folderId);
+      const index = breadcrumbs.findIndex(b => b.id === folderId);
       if (index !== -1) {
         setBreadcrumbs(breadcrumbs.slice(0, index + 1));
         setCurrentFolderId(folderId === 'home' ? null : folderId);
       }
     },
-    [breadcrumbs]
+    [breadcrumbs],
   );
 
   // --- Folder Modal ---
@@ -272,7 +286,9 @@ export default function HomeScreen() {
       }
 
       try {
-        const fileCount = isFolderShare ? 'folder' : `${selectedFileIds.length} file${selectedFileIds.length > 1 ? 's' : ''}`;
+        const fileCount = isFolderShare
+          ? 'folder'
+          : `${selectedFileIds.length} file${selectedFileIds.length > 1 ? 's' : ''}`;
         const message = `Check out this ${fileCount} from Zwipe!`;
         const url = 'https://example.com/shared/files'; // Replace with your actual share URL
 
@@ -292,19 +308,24 @@ export default function HomeScreen() {
         showToast(error.message || 'Failed to share');
       }
     },
-    [selectedFileIds, showToast, clearSelection]
+    [selectedFileIds, showToast, clearSelection],
   );
 
   // --- Test Files ---
   const handleAddTestFiles = useCallback(() => {
     // Generate test files with random positions (not grid) and bias towards images
-    const newFiles = generateRandomFiles(6, currentFolderId || undefined, false, 0.8);
+    const newFiles = generateRandomFiles(
+      6,
+      currentFolderId || undefined,
+      false,
+      0.8,
+    );
 
     // Assign random unique image assets for image files where possible
     const augmented = assignTestImagesToFiles(newFiles, testImages, files);
 
     // Create files in the store, passing the asset when present
-    augmented.forEach((file) => {
+    augmented.forEach(file => {
       createFile(file.name, file.x, file.y, file.parentId, (file as any).asset);
     });
   }, [currentFolderId, createFile, files]);
@@ -312,8 +333,8 @@ export default function HomeScreen() {
   // --- File/Folder Actions ---
   const handleDropAction = useCallback(
     (targetId: string) => {
-      const filesToMove = files.filter((f) => selectedFileIds.includes(f.id));
-      const moveInfos: FileMoveInfo[] = filesToMove.map((file) => ({
+      const filesToMove = files.filter(f => selectedFileIds.includes(f.id));
+      const moveInfos: FileMoveInfo[] = filesToMove.map(file => ({
         fileId: file.id,
         previousParentId: file.parentId || null,
         newParentId: targetId,
@@ -323,13 +344,13 @@ export default function HomeScreen() {
       execute(createMoveFilesAction(moveInfos, targetId));
       clearSelection();
     },
-    [files, selectedFileIds, moveFilesToFolder, clearSelection, execute]
+    [files, selectedFileIds, moveFilesToFolder, clearSelection, execute],
   );
 
   const handleDeleteAction = useCallback(() => {
     if (selectedFileIds.length > 0) {
-      const filesToDelete = files.filter((f) => selectedFileIds.includes(f.id));
-      const moveInfos: FileMoveInfo[] = filesToDelete.map((file) => ({
+      const filesToDelete = files.filter(f => selectedFileIds.includes(f.id));
+      const moveInfos: FileMoveInfo[] = filesToDelete.map(file => ({
         fileId: file.id,
         previousParentId: file.parentId || null,
         newParentId: 'trash',
@@ -353,10 +374,10 @@ export default function HomeScreen() {
             style: 'destructive',
             onPress: () => deleteFolder(folderId),
           },
-        ]
+        ],
       );
     },
-    [deleteFolder]
+    [deleteFolder],
   );
 
   const handleMoveFolder = useCallback(
@@ -381,7 +402,7 @@ export default function HomeScreen() {
       execute(createMoveFolderAction(folderId, previousParent, targetId));
       showToast('Folder moved');
     },
-    [getFolderById, moveFolder, showToast, execute]
+    [getFolderById, moveFolder, showToast, execute],
   );
 
   const handleFolderLongPress = useCallback(
@@ -391,7 +412,9 @@ export default function HomeScreen() {
 
       try {
         const items = useLayoutStore.getState().getItems();
-        const folderLayout = items.find((it) => it.id === id && it.type === 'folder');
+        const folderLayout = items.find(
+          it => it.id === id && it.type === 'folder',
+        );
         if (folderLayout) {
           dragX.value = folderLayout.layout.x + folderLayout.layout.width / 2;
           dragY.value = folderLayout.layout.y + folderLayout.layout.height / 2;
@@ -401,7 +424,7 @@ export default function HomeScreen() {
         // ignore
       }
     },
-    [draggingFolderId, isDrawing, dragX, dragY, dropTargetFolderId]
+    [draggingFolderId, isDrawing, dragX, dragY, dropTargetFolderId],
   );
 
   // --- Sync SharedValue → React ---
@@ -415,7 +438,7 @@ export default function HomeScreen() {
       ) {
         runOnJS(handleSelectionUpdate)(current);
       }
-    }
+    },
   );
 
   // --- Ghost Style for Folder Drag ---
@@ -442,7 +465,7 @@ export default function HomeScreen() {
   // --- Gestures ---
   const pinchGesture = Gesture.Pinch()
     .runOnJS(true)
-    .onStart((e) => {
+    .onStart(e => {
       const cx = canvasLayout.value.width / 2;
       const cy = canvasLayout.value.height / 2;
       const focalX = e.focalX - canvasLayout.value.x;
@@ -460,7 +483,7 @@ export default function HomeScreen() {
         offsetY: startOffsetY,
       };
     })
-    .onUpdate((e) => {
+    .onUpdate(e => {
       const cx = canvasLayout.value.width / 2;
       const cy = canvasLayout.value.height / 2;
       const focalX = e.focalX - canvasLayout.value.x;
@@ -471,10 +494,12 @@ export default function HomeScreen() {
 
       const newOffsetX =
         focalX -
-        (pinchStartValues.current.focalX - pinchStartValues.current.offsetX) * e.scale;
+        (pinchStartValues.current.focalX - pinchStartValues.current.offsetX) *
+          e.scale;
       const newOffsetY =
         focalY -
-        (pinchStartValues.current.focalY - pinchStartValues.current.offsetY) * e.scale;
+        (pinchStartValues.current.focalY - pinchStartValues.current.offsetY) *
+          e.scale;
 
       translateX.value = newOffsetX - cx * (1 - newScale);
       translateY.value = newOffsetY - cy * (1 - newScale);
@@ -488,7 +513,10 @@ export default function HomeScreen() {
   const panGesture = Gesture.Pan()
     .minPointers(1)
     .maxPointers(1)
-    .onStart((e) => {
+    .activeOffsetY([-10, 10])
+    .activeOffsetX([-10, 10])
+    .shouldCancelWhenOutside(false)
+    .onStart(e => {
       'worklet';
       if (
         e.y >= folderStripY.value &&
@@ -517,7 +545,7 @@ export default function HomeScreen() {
       }
       hoveredZoneType.value = null;
     })
-    .onUpdate((e) => {
+    .onUpdate(e => {
       'worklet';
       if (isDrawing.value) {
         currentX.value = e.x;
@@ -533,7 +561,7 @@ export default function HomeScreen() {
           canvasLayout.value.x,
           canvasLayout.value.y,
           canvasLayout.value.width,
-          canvasLayout.value.height
+          canvasLayout.value.height,
         );
         activeSelection.value = ids;
 
@@ -565,7 +593,7 @@ export default function HomeScreen() {
           currentFolders,
           folderStripX.value,
           folderStripY.value,
-          folderStripScrollX.value
+          folderStripScrollX.value,
         );
 
         if (folderId) {
@@ -579,7 +607,7 @@ export default function HomeScreen() {
             e.y,
             zoneBarLayout.value.y,
             zoneBarLayout.value.height,
-            zoneBarLayout.value.width
+            zoneBarLayout.value.width,
           );
 
           if (zoneType && zoneType !== hoveredZoneType.value) {
@@ -603,7 +631,7 @@ export default function HomeScreen() {
           currentFolders,
           folderStripX.value,
           folderStripY.value,
-          folderStripScrollX.value
+          folderStripScrollX.value,
         );
 
         if (folderId) {
@@ -616,7 +644,7 @@ export default function HomeScreen() {
             e.y,
             zoneBarLayout.value.y,
             zoneBarLayout.value.height,
-            zoneBarLayout.value.width
+            zoneBarLayout.value.width,
           );
         }
 
@@ -709,7 +737,7 @@ export default function HomeScreen() {
     <GestureDetector gesture={composedGesture}>
       <ThemedView
         style={styles.container}
-        onLayout={(e) => {
+        onLayout={e => {
           screenWidth.value = e.nativeEvent.layout.width;
         }}
       >
@@ -723,7 +751,9 @@ export default function HomeScreen() {
             >
               {breadcrumbs.map((segment, index) => (
                 <View key={segment.id} style={styles.breadcrumbSegment}>
-                  <TouchableOpacity onPress={() => handleBreadcrumbPress(segment.id)}>
+                  <TouchableOpacity
+                    onPress={() => handleBreadcrumbPress(segment.id)}
+                  >
                     <Text style={styles.breadcrumbText}>{segment.name}</Text>
                   </TouchableOpacity>
                   {index < breadcrumbs.length - 1 && (
@@ -738,7 +768,7 @@ export default function HomeScreen() {
         {/* Folder Strip */}
         <View
           style={styles.folderSection}
-          onLayout={(e) => {
+          onLayout={e => {
             const { x, y, height } = e.nativeEvent.layout;
             folderStripX.value = x;
             folderStripY.value = y;
@@ -762,7 +792,7 @@ export default function HomeScreen() {
         {/* Zone Bar */}
         <View
           style={styles.zoneSection}
-          onLayout={(e) => {
+          onLayout={e => {
             const { x, y, width, height } = e.nativeEvent.layout;
             zoneBarLayout.value = { x, y, width, height };
           }}
@@ -774,13 +804,16 @@ export default function HomeScreen() {
         <View
           ref={canvasSectionRef}
           style={styles.canvasSection}
-          onLayout={(e) => {
+          onLayout={e => {
             const { x, y, width, height } = e.nativeEvent.layout;
             canvasLayout.value = { x, y, width, height };
           }}
         >
           <View style={styles.canvasHeader}>
-            <TouchableOpacity style={styles.addTestButton} onPress={handleAddTestFiles}>
+            <TouchableOpacity
+              style={styles.addTestButton}
+              onPress={handleAddTestFiles}
+            >
               <Text style={styles.addTestButtonText}>+ Add Test Files</Text>
             </TouchableOpacity>
           </View>
@@ -824,7 +857,7 @@ export default function HomeScreen() {
 
         {/* Toast */}
         {toastVisible && (
-          <View style={styles.toastContainer} pointerEvents="none">
+          <View style={styles.toastContainer} pointerEvents='none'>
             <View style={styles.toastBubble}>
               <Text style={styles.toastText}>{toastMessage}</Text>
             </View>
