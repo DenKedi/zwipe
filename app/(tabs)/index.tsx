@@ -69,6 +69,7 @@ export default function HomeScreen() {
     folders,
     createFolder,
     createFile,
+    moveFile,
     moveFilesToFolder,
     deleteFolder,
     moveFolder,
@@ -904,6 +905,36 @@ export default function HomeScreen() {
               onPress={handleAddTestFiles}
             >
               <Text style={styles.addTestButtonText}>+ Add Test Files</Text>
+            </TouchableOpacity>
+            {/* sort button removed — only shuffle remains (right-aligned) */}
+
+            <TouchableOpacity
+              style={{ width: 28, height: 28, marginTop: 8, justifyContent: 'center', alignItems: 'center', alignSelf: 'flex-end', padding: 4 }}
+              onPress={() => {
+                // Big-bang shuffle: randomly respace all file items (all extensions) around center each run
+                const items = visibleFiles.filter(f => f.type === 'file');
+                if (items.length === 0) return;
+
+                const layout = canvasLayout.value as any;
+                if (!layout || !layout.width || !layout.height) return;
+
+                const cx = layout.width / 2;
+                const cy = layout.height / 2;
+                const maxRadius = Math.min(layout.width, layout.height) * 0.45;
+
+                items.forEach((file) => {
+                  // Polar random distribution biased slightly toward center
+                  const theta = Math.random() * Math.PI * 2;
+                  const r = Math.sqrt(Math.random()) * maxRadius;
+                  const localX = cx + Math.cos(theta) * r;
+                  const localY = cy + Math.sin(theta) * r;
+                  const canvasX = Math.round((localX - translateX.value - (1 - scale.value) * cx) / scale.value);
+                  const canvasY = Math.round((localY - translateY.value - (1 - scale.value) * cy) / scale.value);
+                  moveFile(file.id, canvasX, canvasY);
+                });
+              }}
+            >
+              <Image source={require('@/assets/icons/dark/shuffle.png')} style={{ width: 18, height: 18, tintColor: '#fff' }} />
             </TouchableOpacity>
           </View>
           <FileCanvas
