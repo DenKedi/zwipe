@@ -2,7 +2,7 @@ import { useFileSystemStore } from '@/store/useFileSystemStore';
 import { useLayoutStore } from '@/store/useLayoutStore';
 import { Folder } from '@/types';
 import { Folder as FolderIcon, Plus } from 'lucide-react-native';
-import React, { forwardRef, memo, useImperativeHandle, useMemo } from 'react';
+import React, { forwardRef, memo, useImperativeHandle, useMemo, useRef } from 'react';
 import {
   LayoutChangeEvent,
   ScrollView,
@@ -23,7 +23,7 @@ interface FolderStripProps {
   folders: Folder[];
   onFolderPress: (folderId: string) => void;
   onNewFolder: () => void;
-  onFolderLongPress: (id: string) => void;
+  onFolderLongPress: (id: string, pageX?: number, pageY?: number) => void;
   dropTargetFolderId?: SharedValue<string | null>;
   hoverColor?: string;
   // Report scroll X offset (in content pixels) to parent so worklets can use it for hit-testing
@@ -49,7 +49,7 @@ const FolderCard = memo(function FolderCard({
   folder: Folder;
   stats: FolderStats;
   onPress: () => void;
-  onLongPress: (id: string) => void;
+  onLongPress: (id: string, pageX?: number, pageY?: number) => void;
   isDropTarget: SharedValue<boolean>;
   hoverColor?: string;
 }) {
@@ -85,6 +85,8 @@ const FolderCard = memo(function FolderCard({
     };
   });
 
+  const lastTouch = useRef({ x: 0, y: 0 });
+
   return (
     <Animated.View
       style={[styles.folderCard, animatedContainerStyle]}
@@ -93,7 +95,11 @@ const FolderCard = memo(function FolderCard({
       <TouchableOpacity
         style={styles.folderCardInner}
         onPress={onPress}
-        onLongPress={() => onLongPress(folder.id)}
+        onPressIn={(e) => {
+          const { pageX, pageY } = e.nativeEvent;
+          lastTouch.current = { x: pageX, y: pageY };
+        }}
+        onLongPress={() => onLongPress(folder.id, lastTouch.current.x, lastTouch.current.y)}
         activeOpacity={0.7}
       >
         <View style={styles.folderHeader}>
@@ -397,7 +403,7 @@ const FolderCardWrapper = memo(function FolderCardWrapper({
   folder: Folder;
   stats: FolderStats;
   onPress: () => void;
-  onLongPress: (id: string) => void;
+  onLongPress: (id: string, pageX?: number, pageY?: number) => void;
   dropTargetFolderId?: SharedValue<string | null>;
   hoverColor?: string;
 }) {

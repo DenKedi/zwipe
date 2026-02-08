@@ -496,9 +496,17 @@ export default function HomeScreen() {
   );
 
   const handleFolderLongPress = useCallback(
-    (id: string) => {
+    (id: string, pageX?: number, pageY?: number) => {
       draggingFolderId.value = id;
       isDrawing.value = false;
+
+      // If caller supplied absolute touch coordinates (pageX/pageY), prefer those
+      if (typeof pageX === 'number' && typeof pageY === 'number') {
+        dragX.value = pageX;
+        dragY.value = pageY;
+        dropTargetFolderId.value = null;
+        return;
+      }
 
       try {
         const items = useLayoutStore.getState().getItems();
@@ -506,8 +514,12 @@ export default function HomeScreen() {
           it => it.id === id && it.type === 'folder',
         );
         if (folderLayout) {
-          dragX.value = folderLayout.layout.x + folderLayout.layout.width / 2;
-          dragY.value = folderLayout.layout.y + folderLayout.layout.height / 2;
+          // Convert registered folder layout (which is relative to the folder strip)
+          // into absolute screen coordinates by adding the folder strip offsets
+          const absX = folderStripX.value + (folderLayout.layout.x || 0) - folderStripScrollX.value + (folderLayout.layout.width || 0) / 2;
+          const absY = folderStripY.value + (folderLayout.layout.y || 0) + (folderLayout.layout.height || 0) / 2;
+          dragX.value = absX;
+          dragY.value = absY;
         }
         dropTargetFolderId.value = null;
       } catch {
@@ -545,6 +557,7 @@ export default function HomeScreen() {
     pointerEvents: 'none',
     zIndex: 1000,
     transform: [
+      // subtract half the ghost size so the ghost is centered at the pointer
       { translateX: dragX.value - 40 },
       { translateY: dragY.value - 40 },
       { scale: draggingFolderId.value ? 1.1 : 0 },
