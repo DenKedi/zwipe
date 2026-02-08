@@ -4,19 +4,18 @@ import { Folder } from '@/types';
 import { Folder as FolderIcon, Plus } from 'lucide-react-native';
 import React, { forwardRef, memo, useImperativeHandle, useMemo } from 'react';
 import {
-    Image,
-    LayoutChangeEvent,
-    ScrollView,
-    StyleSheet,
-    Text,
-    TouchableOpacity,
-    View,
+  LayoutChangeEvent,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View
 } from 'react-native';
 import Animated, {
-    SharedValue,
-    useAnimatedStyle,
-    useDerivedValue,
-    withSpring,
+  SharedValue,
+  useAnimatedStyle,
+  useDerivedValue,
+  withSpring,
 } from 'react-native-reanimated';
 import { ThemedView } from './themed-view';
 
@@ -336,19 +335,7 @@ export const FolderStrip = memo(
         </View>
 
         <View style={styles.stripContainer} onLayout={handleLayout}>
-          {showLeftArrow && (
-            <TouchableOpacity
-              style={styles.leftArrow}
-              onPress={onPressLeft}
-              onPressIn={() => (ref as any)?.current?.startAutoScroll?.(-1)}
-              onPressOut={() => (ref as any)?.current?.stopAutoScroll?.()}
-            >
-              <Image
-                source={require('../assets/icons/light/arrow_left.png')}
-                style={styles.arrowIcon}
-              />
-            </TouchableOpacity>
-          )}
+
 
           {/* Folder List */}
           <ScrollView
@@ -390,30 +377,8 @@ export const FolderStrip = memo(
               ))
             )}
 
-            <TouchableOpacity
-              style={styles.newFolderCard}
-              onPress={onNewFolder}
-            >
-              <View style={styles.newFolderInner}>
-                <Plus size={18} color='#64748b' />
-                <Text style={styles.newFolderText}>New folder</Text>
-              </View>
-            </TouchableOpacity>
           </ScrollView>
 
-          {showRightArrow && (
-            <TouchableOpacity
-              style={styles.rightArrow}
-              onPress={onPressRight}
-              onPressIn={() => (ref as any)?.current?.startAutoScroll?.(1)}
-              onPressOut={() => (ref as any)?.current?.stopAutoScroll?.()}
-            >
-              <Image
-                source={require('../assets/icons/light/arrow_right.png')}
-                style={styles.arrowIcon}
-              />
-            </TouchableOpacity>
-          )}
         </View>
       </ThemedView>
     );

@@ -8,42 +8,44 @@ import { ThemedView } from '@/components/themed-view';
 import { ZoneBar } from '@/components/ZoneBar';
 import { useFileSystem } from '@/hooks/useFileSystem';
 import {
-    createDeleteFilesAction,
-    createMoveFilesAction,
-    createMoveFolderAction,
-    createSelectFilesAction,
-    createToggleSelectionAction,
-    FileMoveInfo,
-    useActionHistoryStore,
+  createDeleteFilesAction,
+  createMoveFilesAction,
+  createMoveFolderAction,
+  createSelectFilesAction,
+  createToggleSelectionAction,
+  FileMoveInfo,
+  useActionHistoryStore,
 } from '@/store/actions';
 import { useLayoutStore } from '@/store/useLayoutStore';
 import { useSelectionStore } from '@/store/useSelectionStore';
 import { BreadcrumbSegment, ZoneType } from '@/types';
 import {
-    buildSmoothPath,
-    calculateIntersectedIds,
-    checkFolderIntersection,
-    checkZoneIntersection,
+  buildSmoothPath,
+  calculateIntersectedIds,
+  checkFolderIntersection,
+  checkZoneIntersection,
 } from '@/utils/canvasIntersection';
 import {
-    assignTestImagesToFiles,
-    generateRandomFiles,
+  assignTestImagesToFiles,
+  generateFileAt,
+  generateRandomFiles,
 } from '@/utils/fileSystemHelpers';
+import * as ImagePicker from 'expo-image-picker';
 import { useCallback, useMemo, useRef, useState } from 'react';
 import {
-    Alert,
-    ScrollView,
-    Share,
-    Text,
-    TouchableOpacity,
-    View,
+  Alert,
+  ScrollView,
+  Share,
+  Text,
+  TouchableOpacity,
+  View,
 } from 'react-native';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import Animated, {
-    runOnJS,
-    useAnimatedReaction,
-    useAnimatedStyle,
-    useSharedValue,
+  runOnJS,
+  useAnimatedReaction,
+  useAnimatedStyle,
+  useSharedValue,
 } from 'react-native-reanimated';
 import { styles } from './_index.styles';
 
@@ -164,6 +166,8 @@ export default function HomeScreen() {
       ),
     [files, currentFolderId],
   );
+
+  // Note: uploaded images will be persisted to the file store via `createFile`
 
   const currentFolders = useMemo(
     () =>
@@ -329,6 +333,68 @@ export default function HomeScreen() {
       createFile(file.name, file.x, file.y, file.parentId, (file as any).asset);
     });
   }, [currentFolderId, createFile, files]);
+
+  // --- Image Picker Handler (FAB) ---
+  const handlePickImage = useCallback(async () => {
+    try {
+      const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (perm.status !== 'granted') {
+        showToast('Permission to access photos is required');
+        return;
+      }
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        quality: 0.8,
+        allowsMultipleSelection: true,
+      });
+
+      // Normalize result to assets array
+      if ((result as any).cancelled === true) return;
+      const assets: any[] = (result as any).assets ?? ((result as any).uri ? [{ uri: (result as any).uri }] : []);
+      if (!assets || assets.length === 0) return;
+
+      const layout = canvasLayout.value as any;
+
+      for (let i = 0; i < assets.length; i++) {
+        const a = assets[i];
+        const uri = a.uri;
+        if (!uri) continue;
+
+        const extMatch = uri.split('.').pop()?.split('?')[0].split('#')[0];
+        const ext = (extMatch || 'jpg').toLowerCase();
+        const name = `Upload_${Date.now()}_${i}.${ext}`;
+
+        if (!layout || !layout.width || !layout.height) {
+          const fallback = generateFileAt(120 + i * 10, 120 + i * 10, name, ext, currentFolderId || undefined);
+          (fallback as any).asset = { uri };
+          createFile(fallback.name, fallback.x, fallback.y, fallback.parentId, (fallback as any).asset);
+          continue;
+        }
+
+        // Place images around the visible canvas center with a looser random spread
+        const cx = layout.width / 2;
+        const cy = layout.height / 2;
+        // Increase spread fraction and minimum to loosen grouping
+        const spreadX = Math.min(Math.max(layout.width * 0.45, 160), layout.width / 2 - 20);
+        const spreadY = Math.min(Math.max(layout.height * 0.45, 120), layout.height / 2 - 20);
+        // Give each item a larger per-index offset to reduce clustering
+        const centerOffsetX = (Math.random() * 2 - 1) * spreadX + (i - (assets.length - 1) / 2) * 32;
+        const centerOffsetY = (Math.random() * 2 - 1) * spreadY + (i - (assets.length - 1) / 2) * 24;
+
+        const localX = cx + centerOffsetX;
+        const localY = cy + centerOffsetY;
+
+        const canvasX = Math.round((localX - translateX.value - (1 - scale.value) * cx) / scale.value);
+        const canvasY = Math.round((localY - translateY.value - (1 - scale.value) * cy) / scale.value);
+
+        const newFile = generateFileAt(canvasX, canvasY, name, ext, currentFolderId || undefined);
+        (newFile as any).asset = { uri };
+        createFile(newFile.name, newFile.x, newFile.y, newFile.parentId, (newFile as any).asset);
+      }
+    } catch (err: any) {
+      showToast(err?.message || 'Failed to pick image');
+    }
+  }, [canvasLayout, currentFolderId, scale, translateX, translateY, createFile]);
 
   // --- File/Folder Actions ---
   const handleDropAction = useCallback(
@@ -825,6 +891,7 @@ export default function HomeScreen() {
             selectedFileIds={selectedFileIds}
             onFileSelect={handleFileSelect}
           />
+          {/* upload moved into ActionBar */}
         </View>
 
         {/* Folder Ghost */}
@@ -872,6 +939,7 @@ export default function HomeScreen() {
           onUndo={undo}
           onRedo={redo}
           onClear={clearSelection}
+          onUpload={handlePickImage}
         />
 
         {/* Modals */}
