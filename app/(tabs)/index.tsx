@@ -131,6 +131,7 @@ export default function HomeScreen() {
   const currentX = useSharedValue(0);
   const currentY = useSharedValue(0);
   const isDrawing = useSharedValue(false);
+  const drawingStartTime = useSharedValue(0);
   const pointsX = useSharedValue<number[]>([]);
   const pointsY = useSharedValue<number[]>([]);
 
@@ -568,7 +569,15 @@ export default function HomeScreen() {
   // --- Gestures ---
   const pinchGesture = Gesture.Pinch()
     .runOnJS(true)
+    .enabled(true)
     .onStart(e => {
+      // Block pinch if drawing has been active for more than 0.5s
+      if (isDrawing.value && drawingStartTime.value > 0) {
+        const elapsed = Date.now() - drawingStartTime.value;
+        if (elapsed >= 500) {
+          return;
+        }
+      }
       const cx = canvasLayout.value.width / 2;
       const cy = canvasLayout.value.height / 2;
       const focalX = e.focalX - canvasLayout.value.x;
@@ -587,6 +596,13 @@ export default function HomeScreen() {
       };
     })
     .onUpdate(e => {
+      // Block pinch if drawing has been active for more than 0.5s
+      if (isDrawing.value && drawingStartTime.value > 0) {
+        const elapsed = Date.now() - drawingStartTime.value;
+        if (elapsed >= 500) {
+          return;
+        }
+      }
       const cx = canvasLayout.value.width / 2;
       const cy = canvasLayout.value.height / 2;
       const focalX = e.focalX - canvasLayout.value.x;
@@ -634,8 +650,10 @@ export default function HomeScreen() {
 
       if (draggingFolderId.value) {
         isDrawing.value = false;
+        drawingStartTime.value = 0;
       } else {
         isDrawing.value = true;
+        drawingStartTime.value = Date.now();
         runOnJS(handleResetGradient)();
         activeSelection.value = [];
         pointsX.value = [e.x];
@@ -825,6 +843,8 @@ export default function HomeScreen() {
       }
 
       runOnJS(handleResetGradient)();
+      isDrawing.value = false;
+      drawingStartTime.value = 0;
       path.value = '';
       pointsX.value = [];
       pointsY.value = [];
