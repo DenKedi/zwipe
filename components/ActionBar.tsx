@@ -1,4 +1,4 @@
-import { Eraser, Redo2, Undo2 } from 'lucide-react-native';
+import { Eraser, Plus, Redo2, Undo2 } from 'lucide-react-native';
 import React from 'react';
 import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 
@@ -9,6 +9,7 @@ interface ActionBarProps {
   onUndo: () => void;
   onRedo: () => void;
   onClear: () => void;
+  onUpload?: () => void;
 }
 
 export function ActionBar({
@@ -18,6 +19,7 @@ export function ActionBar({
   onUndo,
   onRedo,
   onClear,
+  onUpload,
 }: ActionBarProps) {
   return (
     <View style={styles.actionButtonsContainer}>
@@ -84,6 +86,15 @@ export function ActionBar({
         >
           Clear
         </Text>
+      </TouchableOpacity>
+
+      {/* Upload button: matches style of other action buttons */}
+      <TouchableOpacity
+        style={styles.actionButton}
+        onPress={onUpload}
+      >
+        <Plus size={20} color={'#f1f5f9'} strokeWidth={2.5} />
+        <Text style={styles.actionButtonText}>Upload</Text>
       </TouchableOpacity>
     </View>
   );
