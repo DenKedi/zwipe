@@ -1,12 +1,12 @@
-import { StyleSheet, View } from 'react-native';
-import Animated, {
-  useAnimatedStyle,
-  SharedValue,
-} from 'react-native-reanimated';
-import { ThemedView } from './themed-view';
-import { FileItem } from './FileItem';
 import { FileSystemItem } from '@/types';
 import { useMemo } from 'react';
+import { StyleSheet, View } from 'react-native';
+import Animated, {
+    SharedValue,
+    useAnimatedStyle,
+} from 'react-native-reanimated';
+import { FileItem } from './FileItem';
+import { ThemedView } from './themed-view';
 
 interface FileCanvasProps {
   scale: SharedValue<number>;
@@ -15,6 +15,7 @@ interface FileCanvasProps {
   files: FileSystemItem[];
   selectedFileIds: string[];
   onFileSelect?: (fileId: string) => void;
+  onPreview?: (file: FileSystemItem) => void;
 }
 
 export function FileCanvas({ 
@@ -24,6 +25,7 @@ export function FileCanvas({
   files,
   selectedFileIds,
   onFileSelect,
+  onPreview,
 }: FileCanvasProps) {
   // Optimized: Reduced from 50x50 (2500 views) to 10x10 (100 views) for better performance
   const gridSpacing = 200;
@@ -71,7 +73,8 @@ export function FileCanvas({
               file={file}
               isSelected={selectedFileIds.includes(file.id)}
               selectionColor="#576ffb"
-              onPress={onFileSelect ? () => onFileSelect(file.id) : undefined}
+              onPress={onPreview ? () => onPreview(file) : onFileSelect ? () => onFileSelect(file.id) : undefined}
+              onLongPress={onFileSelect ? () => onFileSelect(file.id) : undefined}
             />
           ))}
         </Animated.View>

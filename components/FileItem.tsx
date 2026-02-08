@@ -9,10 +9,11 @@ interface FileItemProps {
   isSelected: boolean;
   selectionColor?: string;
   onPress?: () => void;
+  onLongPress?: () => void;
   onLayout?: (layout: { x: number; y: number; width: number; height: number }) => void;
 }
 
-export const FileItem = memo(function FileItem({ file, isSelected, selectionColor = '#576ffb', onPress, onLayout }: FileItemProps) {
+export const FileItem = memo(function FileItem({ file, isSelected, selectionColor = '#576ffb', onPress, onLongPress, onLayout }: FileItemProps) {
   const selected = useSharedValue(isSelected ? 1 : 0);
 
   useEffect(() => {
@@ -109,6 +110,7 @@ export const FileItem = memo(function FileItem({ file, isSelected, selectionColo
     >
       <TouchableOpacity
         onPress={onPress}
+        onLongPress={onLongPress}
         disabled={!onPress}
         activeOpacity={0.7}
       >

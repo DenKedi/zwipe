@@ -34,10 +34,13 @@ import * as ImagePicker from 'expo-image-picker';
 import { useCallback, useMemo, useRef, useState } from 'react';
 import {
   Alert,
+  Image,
+  Modal,
   ScrollView,
   Share,
   Text,
   TouchableOpacity,
+  TouchableWithoutFeedback,
   View,
 } from 'react-native';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
@@ -103,6 +106,8 @@ export default function HomeScreen() {
   // Toast State
   const [toastVisible, setToastVisible] = useState(false);
   const [toastMessage, setToastMessage] = useState('');
+  // Preview state for lightbox
+  const [selectedPreviewImage, setSelectedPreviewImage] = useState<any | null>(null);
 
   // Gradient Colors
   const [gradientStartColor, setGradientStartColor] = useState(
@@ -231,6 +236,24 @@ export default function HomeScreen() {
     },
     [selectedIds, setSelectedIds, execute],
   );
+
+  const handlePreview = useCallback((file: any) => {
+    // Support static require assets (number) and remote uri
+    const asset = (file as any).asset ?? null;
+    const uri = asset && typeof asset === 'object' && asset.uri ? asset.uri : null;
+    if (uri) {
+      setSelectedPreviewImage({ uri });
+      return;
+    }
+    if (asset) {
+      // static require asset (number) or object, pass through
+      setSelectedPreviewImage(asset);
+      return;
+    }
+    if ((file as any).uri) {
+      setSelectedPreviewImage({ uri: (file as any).uri });
+    }
+  }, []);
 
   // --- Folder Autoscroll ---
   const startFolderStripAutoScroll = useCallback((dir: number) => {
@@ -890,6 +913,7 @@ export default function HomeScreen() {
             files={visibleFiles}
             selectedFileIds={selectedFileIds}
             onFileSelect={handleFileSelect}
+            onPreview={handlePreview}
           />
           {/* upload moved into ActionBar */}
         </View>
@@ -909,6 +933,37 @@ export default function HomeScreen() {
           gradientStart={gradientStartColor}
           gradientEnd={gradientEndColor}
         />
+
+        {/* Image Preview Modal */}
+        <Modal
+          visible={!!selectedPreviewImage}
+          transparent
+          animationType="fade"
+          onRequestClose={() => setSelectedPreviewImage(null)}
+        >
+          <TouchableWithoutFeedback onPress={() => setSelectedPreviewImage(null)}>
+            <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.7)', justifyContent: 'center', alignItems: 'center' }}>
+              <TouchableWithoutFeedback>
+                <View style={{ width: '100%', alignItems: 'center', justifyContent: 'center' }}>
+                  <TouchableOpacity
+                    onPress={() => setSelectedPreviewImage(null)}
+                    style={{ position: 'absolute', top: 40, right: 20, zIndex: 20 }}
+                  >
+                    <Text style={{ color: '#fff', fontSize: 24 }}>✕</Text>
+                  </TouchableOpacity>
+
+                  {selectedPreviewImage && (
+                    <Image
+                      source={ typeof selectedPreviewImage === 'string' ? { uri: selectedPreviewImage } : selectedPreviewImage }
+                      style={{ width: '92%', height: '80%' }}
+                      resizeMode="contain"
+                    />
+                  )}
+                </View>
+              </TouchableWithoutFeedback>
+            </View>
+          </TouchableWithoutFeedback>
+        </Modal>
 
         {/* Selection Counter */}
         {selectedFileIds.length > 0 && (
