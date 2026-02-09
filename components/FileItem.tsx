@@ -1,6 +1,6 @@
 import { FileSystemItem } from '@/types';
 import { Archive, File, FileSpreadsheet, FileText, Film, Image as ImageIcon, Music } from 'lucide-react-native';
-import { memo, useEffect } from 'react';
+import { memo, useEffect, useState } from 'react';
 import { Image, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import Animated, { useAnimatedStyle, useSharedValue, withSpring } from 'react-native-reanimated';
 
@@ -15,6 +15,7 @@ interface FileItemProps {
 
 export const FileItem = memo(function FileItem({ file, isSelected, selectionColor = '#576ffb', onPress, onLongPress, onLayout }: FileItemProps) {
   const selected = useSharedValue(isSelected ? 1 : 0);
+  const [imageError, setImageError] = useState(false);
 
   useEffect(() => {
     selected.value = isSelected ? 1 : 0;
@@ -34,6 +35,8 @@ export const FileItem = memo(function FileItem({ file, isSelected, selectionColo
       case 'gif':
       case 'webp':
       case 'svg':
+      case 'heic':
+      case 'heif':
         return <ImageIcon size={size} color="#10b981" />;
       case 'mp4':
       case 'mov':
@@ -129,10 +132,21 @@ export const FileItem = memo(function FileItem({ file, isSelected, selectionColo
           ]}
         >
           {/* Preview for images */}
-          {(fileExtension === 'jpg' || fileExtension === 'jpeg' || fileExtension === 'png' || fileExtension === 'gif' || fileExtension === 'webp') ? (
+          {(fileExtension === 'jpg' || fileExtension === 'jpeg' || fileExtension === 'png' || fileExtension === 'gif' || fileExtension === 'webp' || fileExtension === 'heic' || fileExtension === 'heif') ? (
             <View style={styles.imagePreview}>
-              {(file as any).asset ? (
-                <Image source={(file as any).asset} style={styles.image} resizeMode="cover" />
+              {(file as any).asset && !imageError ? (
+                <Image
+                  source={
+                    typeof (file as any).asset === 'number'
+                      ? (file as any).asset
+                      : typeof (file as any).asset === 'object' && (file as any).asset.uri
+                        ? { uri: (file as any).asset.uri }
+                        : (file as any).asset
+                  }
+                  style={styles.image}
+                  resizeMode="cover"
+                  onError={() => setImageError(true)}
+                />
               ) : (
                 getFileIcon()
               )}

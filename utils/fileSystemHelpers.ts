@@ -7,8 +7,8 @@ import { FILE_WIDTH, FILE_HEIGHT } from './canvasIntersection';
  * minGap = dimension * (1 - MAX_OVERLAP) e.g. 100 * 0.8 = 80px.
  */
 const MAX_OVERLAP = 0.2;
-const MIN_GAP_X = FILE_WIDTH * (1 - MAX_OVERLAP);   // 80
-const MIN_GAP_Y = FILE_HEIGHT * (1 - MAX_OVERLAP);  // 80
+const MIN_GAP_X = FILE_WIDTH * (1 - MAX_OVERLAP); // 80
+const MIN_GAP_Y = FILE_HEIGHT * (1 - MAX_OVERLAP); // 80
 
 /**
  * Check whether `(x, y)` overlaps more than 20 % with any occupied position.
@@ -90,14 +90,15 @@ export function generateRandomFile(
   x?: number,
   y?: number,
   name?: string,
-  extension?: string
+  extension?: string,
 ): FileSystemItem {
   const fileType = FILE_TYPES[Math.floor(Math.random() * FILE_TYPES.length)];
   const randomId = Math.random().toString(36).substring(2, 9);
   const randomSize = Math.floor(Math.random() * 5000000) + 1024;
 
   const ext = extension || fileType.ext;
-  const fileName = name || `${fileType.name}_${randomId.substring(0, 4)}.${ext}`;
+  const fileName =
+    name || `${fileType.name}_${randomId.substring(0, 4)}.${ext}`;
 
   // Spawn randomly around a loose origin area to avoid perfect overlap
   const randomX = x ?? Math.floor(Math.random() * 800) + 50;
@@ -124,7 +125,7 @@ export function generateRandomFiles(
   count: number,
   parentId?: string,
   gridLayout: boolean = false,
-  imageProbability: number = 0.2 // chance a generated file will be an image
+  imageProbability: number = 0.2, // chance a generated file will be an image
 ): FileSystemItem[] {
   const files: FileSystemItem[] = [];
   const IMAGE_EXTS = ['jpg', 'jpeg', 'png', 'gif', 'webp'];
@@ -194,7 +195,7 @@ export function generateRandomFolder(parentId?: string): Folder {
  */
 export function generateRandomFolders(
   count: number,
-  parentId?: string
+  parentId?: string,
 ): Folder[] {
   const folders: Folder[] = [];
 
@@ -213,7 +214,7 @@ export function generateFileAt(
   y: number,
   name?: string,
   extension?: string,
-  parentId?: string
+  parentId?: string,
 ): FileSystemItem {
   const randomId = Math.random().toString(36).substring(2, 9);
   const ext = extension || 'txt';
@@ -262,32 +263,41 @@ export function getFileTypeConfig(extension: string) {
 export function assignTestImagesToFiles(
   files: FileSystemItem[],
   imageAssets: any[],
-  existingFiles: FileSystemItem[] = []
+  existingFiles: FileSystemItem[] = [],
 ): FileSystemItem[] {
   // Build set of already used asset URIs to avoid duplicates
   const usedAssets = new Set<number | string>();
-  existingFiles.forEach((f) => {
+  existingFiles.forEach(f => {
     if ((f as any).asset) usedAssets.add((f as any).asset);
   });
 
   // Pool of available assets not yet used
-  const available = imageAssets.filter((a) => !usedAssets.has(a));
+  const available = imageAssets.filter(a => !usedAssets.has(a));
 
   // Shuffle available assets
   const shuffled = available.slice().sort(() => Math.random() - 0.5);
 
   let idx = 0;
 
-  return files.map((f) => {
+  return files.map(f => {
     const ext = f.extension?.toLowerCase();
-    if (ext === 'jpg' || ext === 'jpeg' || ext === 'png' || ext === 'gif' || ext === 'webp') {
+    if (
+      ext === 'jpg' ||
+      ext === 'jpeg' ||
+      ext === 'png' ||
+      ext === 'gif' ||
+      ext === 'webp' ||
+      ext === 'heic' ||
+      ext === 'heif'
+    ) {
       // If we have shuffled assets left, assign one uniquely
       if (idx < shuffled.length) {
         const asset = shuffled[idx++];
         return { ...f, asset };
       }
       // Otherwise, fallback to random (may duplicate)
-      const randomAsset = imageAssets[Math.floor(Math.random() * imageAssets.length)];
+      const randomAsset =
+        imageAssets[Math.floor(Math.random() * imageAssets.length)];
       return { ...f, asset: randomAsset };
     }
     return f;
