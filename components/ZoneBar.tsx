@@ -29,6 +29,7 @@ interface ZoneBarProps {
   hoveredZoneType?: SharedValue<ZoneType | null>;
   tempFileCount?: number;
   onTempPress?: () => void;
+  drawingFromTemp?: SharedValue<boolean>;
 }
 
 interface ZoneItemProps {
@@ -116,16 +117,19 @@ function ZoneItem({ zone, isHovered, onLayout, badge, onPress }: ZoneItemProps) 
   );
 }
 
-export function ZoneBar({ hoveredZoneType, tempFileCount, onTempPress }: ZoneBarProps) {
+export function ZoneBar({ hoveredZoneType, tempFileCount, onTempPress, drawingFromTemp }: ZoneBarProps) {
   const registerItem = useLayoutStore((state) => state.registerItem);
   
   // Fallback shared value when hoveredZoneType is not provided
   const fallbackHovered = useSharedValue<ZoneType | null>(null);
   const activeHoveredType = hoveredZoneType ?? fallbackHovered;
 
+  const fallbackDrawingFromTemp = useSharedValue(false);
+  const activeDrawingFromTemp = drawingFromTemp ?? fallbackDrawingFromTemp;
+
   // Create derived values for each zone's hover state
   const trashHovered = useDerivedValue(() => activeHoveredType.value === 'trash');
-  const tempHovered = useDerivedValue(() => activeHoveredType.value === 'temp');
+  const tempHovered = useDerivedValue(() => activeHoveredType.value === 'temp' || activeDrawingFromTemp.value);
   const copyHovered = useDerivedValue(() => activeHoveredType.value === 'copy');
   const shareHovered = useDerivedValue(() => activeHoveredType.value === 'share');
 

@@ -1067,6 +1067,7 @@ export default function HomeScreen() {
             hoveredZoneType={hoveredZoneType}
             tempFileCount={tempFileCount}
             onTempPress={handleTempPress}
+            drawingFromTemp={drawingFromTemp}
           />
         </View>
 
