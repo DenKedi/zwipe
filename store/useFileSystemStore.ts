@@ -1,5 +1,12 @@
 import { FileSystemItem, Folder } from '@/types';
 import { create } from 'zustand';
+import { Dimensions } from 'react-native';
+import { testImages } from '@/assets/testImages';
+import {
+  assignTestImagesToFiles,
+  generateRandomFiles,
+  resolveNonOverlappingPosition,
+} from '@/utils/fileSystemHelpers';
 
 interface FileSystemState {
   files: FileSystemItem[];
@@ -124,112 +131,36 @@ export const useFileSystemStore = create<FileSystemState>((set, get) => ({
       },
     ];
 
-    // Helper to generate random position around center with overlap check
-    const generateFuzzyPosition = (
-      existingFiles: FileSystemItem[],
-      centerX: number,
-      centerY: number,
-      spread: number,
-      minDistance: number
-    ): { x: number; y: number } => {
-      let x, y;
-      let attempts = 0;
-      const maxAttempts = 50;
+    // Generate test files using the same logic as the "+Add Test Files" button
+    const newFiles = generateRandomFiles(6, undefined, false, 0.8);
+    const augmented = assignTestImagesToFiles(newFiles, testImages, []);
 
-      do {
-        // Random position around center
-        x = centerX + (Math.random() - 0.5) * spread;
-        y = centerY + (Math.random() - 0.5) * spread;
-
-        // Check distance to all existing files
-        let tooClose = false;
-        for (const file of existingFiles) {
-          const dx = file.x - x;
-          const dy = file.y - y;
-          const distance = Math.sqrt(dx * dx + dy * dy);
-          if (distance < minDistance) {
-            tooClose = true;
-            break;
-          }
-        }
-
-        if (!tooClose) return { x, y };
-        attempts++;
-      } while (attempts < maxAttempts);
-
-      // If we couldn't find a spot, just return the last generated one
-      return { x, y };
-    };
-
+    const siblings: { x: number; y: number }[] = [];
     const dummyFiles: FileSystemItem[] = [];
-    const centerX = 400;
-    const centerY = 300;
-    const spread = 500; // Spread area width/height
-    const minDistance = 80; // Allow some overlap (files are ~100px)
 
-    // Generate 6 random files
-    const fileTypes = [
-      { name: 'Document.pdf', ext: 'pdf', size: 2048000 },
-      { name: 'Photo.jpg', ext: 'jpg', size: 5120000 },
-      { name: 'Notes.txt', ext: 'txt', size: 8192 },
-      { name: 'Spreadsheet.xlsx', ext: 'xlsx', size: 102400 },
-      { name: 'Presentation.pptx', ext: 'pptx', size: 3145728 },
-      { name: 'Report.docx', ext: 'docx', size: 512000 },
-    ];
+    // Cluster around screen center
+    const { width, height } = Dimensions.get('window');
+    // Adjust center slightly up (-50) because of tab bar / headers usually taking bottom/top space
+    const centerX = width / 2;
+    const centerY = height / 2 - 50; 
+    
+    // Use a tighter spread so they look like a single starting group
+    const spread = Math.min(width, height) * 0.4; 
 
-    fileTypes.forEach((type, index) => {
-      const pos = generateFuzzyPosition(
-        dummyFiles,
-        centerX,
-        centerY,
-        spread,
-        minDistance
-      );
+    augmented.forEach(file => {
+      // Override random positions from generateRandomFiles to cluster them
+      const targetX = centerX + (Math.random() - 0.5) * spread;
+      const targetY = centerY + (Math.random() - 0.5) * spread;
+
+      const pos = resolveNonOverlappingPosition(targetX, targetY, siblings);
+      siblings.push(pos);
 
       dummyFiles.push({
-        id: `file-${index + 1}`,
-        name: type.name,
-        type: 'file',
-        extension: type.ext,
+        ...file,
         x: pos.x,
         y: pos.y,
-        parentId: undefined,
-        size: type.size,
-        createdAt: new Date(),
-        modifiedAt: new Date(),
       });
     });
-
-    // Create two files with exactly minDistance to demonstrate overlap limit
-    // File A
-    const fileA: FileSystemItem = {
-      id: 'file-overlap-1',
-      name: 'Overlap_A.png',
-      type: 'file',
-      extension: 'png',
-      x: centerX,
-      y: centerY + 200,
-      parentId: undefined,
-      size: 4096000,
-      createdAt: new Date(),
-      modifiedAt: new Date(),
-    };
-    dummyFiles.push(fileA);
-
-    // File B - placed exactly minDistance away on X axis
-    const fileB: FileSystemItem = {
-      id: 'file-overlap-2',
-      name: 'Overlap_B.csv',
-      type: 'file',
-      extension: 'csv',
-      x: centerX + minDistance, // Exactly minDistance away
-      y: centerY + 200,
-      parentId: undefined,
-      size: 256000,
-      createdAt: new Date(),
-      modifiedAt: new Date(),
-    };
-    dummyFiles.push(fileB);
 
     set({
       folders: dummyFolders,
