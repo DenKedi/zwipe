@@ -18,7 +18,7 @@ import {
 } from '@/store/actions';
 import { useLayoutStore } from '@/store/useLayoutStore';
 import { useSelectionStore } from '@/store/useSelectionStore';
-import { BreadcrumbSegment, ZoneType } from '@/types';
+import { BreadcrumbSegment, TEMP_FOLDER_ID, ZoneType } from '@/types';
 import {
   buildSmoothPath,
   calculateIntersectedIds,
@@ -132,6 +132,7 @@ export default function HomeScreen() {
   const currentY = useSharedValue(0);
   const isDrawing = useSharedValue(false);
   const drawingStartTime = useSharedValue(0);
+  const drawingFromTemp = useSharedValue(false);
   const pointsX = useSharedValue<number[]>([]);
   const pointsY = useSharedValue<number[]>([]);
 
@@ -175,6 +176,15 @@ export default function HomeScreen() {
   );
 
   // Note: uploaded images will be persisted to the file store via `createFile`
+
+  // Temp Zone
+  const tempFiles = useMemo(
+    () => files.filter(f => f.parentId === TEMP_FOLDER_ID),
+    [files],
+  );
+  const tempFileCount = tempFiles.length;
+  const tempFileIds = useMemo(() => tempFiles.map(f => f.id), [tempFiles]);
+  const isTempView = currentFolderId === TEMP_FOLDER_ID;
 
   const currentFolders = useMemo(
     () =>
@@ -450,8 +460,96 @@ export default function HomeScreen() {
       moveFilesToFolder(selectedFileIds, 'trash');
       execute(createDeleteFilesAction(moveInfos));
       clearSelection();
+      showToast(`${filesToDelete.length} file(s) deleted`);
     }
-  }, [selectedFileIds, files, moveFilesToFolder, clearSelection, execute]);
+  }, [selectedFileIds, files, moveFilesToFolder, clearSelection, execute, showToast]);
+
+  // --- Temp Zone Actions ---
+  const handleMoveToTemp = useCallback(() => {
+    if (selectedFileIds.length === 0) return;
+    const filesToMove = files.filter(f => selectedFileIds.includes(f.id));
+    const moveInfos: FileMoveInfo[] = filesToMove.map(file => ({
+      fileId: file.id,
+      previousParentId: file.parentId || null,
+      newParentId: TEMP_FOLDER_ID,
+    }));
+    moveFilesToFolder(selectedFileIds, TEMP_FOLDER_ID);
+    execute(createMoveFilesAction(moveInfos, TEMP_FOLDER_ID));
+    clearSelection();
+    showToast(`${selectedFileIds.length} file(s) stored in Temp`);
+  }, [selectedFileIds, files, moveFilesToFolder, clearSelection, execute, showToast]);
+
+  const handleTempPress = useCallback(() => {
+    if (currentFolderId === TEMP_FOLDER_ID) return;
+    setCurrentFolderId(TEMP_FOLDER_ID);
+    setBreadcrumbs([
+      { id: 'home', name: 'Home' },
+      { id: TEMP_FOLDER_ID, name: 'Temp' },
+    ]);
+    folderStripRef.current?.scrollToStart?.();
+  }, [currentFolderId]);
+
+  const handleTempDropToFolder = useCallback(
+    (targetFolderId: string) => {
+      if (tempFileIds.length === 0) {
+        showToast('No files in Temp');
+        return;
+      }
+      const moveInfos: FileMoveInfo[] = tempFiles.map(file => ({
+        fileId: file.id,
+        previousParentId: TEMP_FOLDER_ID as string | null,
+        newParentId: targetFolderId,
+      }));
+      moveFilesToFolder(tempFileIds, targetFolderId);
+      execute(createMoveFilesAction(moveInfos, targetFolderId));
+      showToast(`${tempFileIds.length} file(s) moved from Temp`);
+    },
+    [tempFiles, tempFileIds, moveFilesToFolder, execute, showToast],
+  );
+
+  const handleTempToCanvas = useCallback(() => {
+    if (tempFileIds.length === 0) {
+      showToast('No files in Temp');
+      return;
+    }
+    const targetId = currentFolderId === TEMP_FOLDER_ID ? null : currentFolderId;
+    const moveInfos: FileMoveInfo[] = tempFiles.map(file => ({
+      fileId: file.id,
+      previousParentId: TEMP_FOLDER_ID as string | null,
+      newParentId: targetId,
+    }));
+    moveFilesToFolder(tempFileIds, targetId);
+    execute(createMoveFilesAction(moveInfos, targetId));
+    showToast(`${tempFileIds.length} file(s) retrieved from Temp`);
+  }, [tempFiles, tempFileIds, currentFolderId, moveFilesToFolder, execute, showToast]);
+
+  const handleTempDelete = useCallback(() => {
+    if (tempFileIds.length === 0) return;
+    const moveInfos: FileMoveInfo[] = tempFiles.map(file => ({
+      fileId: file.id,
+      previousParentId: TEMP_FOLDER_ID as string | null,
+      newParentId: 'trash',
+    }));
+    moveFilesToFolder(tempFileIds, 'trash');
+    execute(createDeleteFilesAction(moveInfos));
+    showToast(`${tempFileIds.length} file(s) deleted from Temp`);
+  }, [tempFiles, tempFileIds, moveFilesToFolder, execute, showToast]);
+
+  const handleTempShare = useCallback(async () => {
+    if (tempFileIds.length === 0) {
+      showToast('No files in Temp to share');
+      return;
+    }
+    try {
+      const message = `Check out these ${tempFileIds.length} file(s) from Zwipe Temp!`;
+      const result = await Share.share({ message, title: 'Share Temp Files' });
+      if (result.action === Share.sharedAction) {
+        showToast('Shared successfully!');
+      }
+    } catch (error: any) {
+      showToast(error.message || 'Failed to share');
+    }
+  }, [tempFileIds, showToast]);
 
   const handleDeleteFolder = useCallback(
     (folderId: string) => {
@@ -648,10 +746,35 @@ export default function HomeScreen() {
       dragX.value = e.x;
       dragY.value = e.y;
 
+      // Check if starting from temp zone
+      const startZone = checkZoneIntersection(
+        e.x,
+        e.y,
+        zoneBarLayout.value.y,
+        zoneBarLayout.value.height,
+        zoneBarLayout.value.width,
+      );
+
       if (draggingFolderId.value) {
         isDrawing.value = false;
         drawingStartTime.value = 0;
+        drawingFromTemp.value = false;
+      } else if (startZone === 'temp') {
+        // Drawing from temp zone
+        drawingFromTemp.value = true;
+        isDrawing.value = true;
+        drawingStartTime.value = Date.now();
+        runOnJS(handleGradientUpdate)('#8b5cf6', '#ffffff');
+        activeSelection.value = [];
+        pointsX.value = [e.x];
+        pointsY.value = [e.y];
+        startX.value = e.x;
+        startY.value = e.y;
+        currentX.value = e.x;
+        currentY.value = e.y;
+        path.value = `M ${e.x} ${e.y}`;
       } else {
+        drawingFromTemp.value = false;
         isDrawing.value = true;
         drawingStartTime.value = Date.now();
         runOnJS(handleResetGradient)();
@@ -672,19 +795,22 @@ export default function HomeScreen() {
         currentX.value = e.x;
         currentY.value = e.y;
 
-        const ids = calculateIntersectedIds(
-          e.x,
-          e.y,
-          visibleFiles,
-          scale.value,
-          translateX.value,
-          translateY.value,
-          canvasLayout.value.x,
-          canvasLayout.value.y,
-          canvasLayout.value.width,
-          canvasLayout.value.height,
-        );
-        activeSelection.value = ids;
+        // Skip file intersection when drawing from temp zone
+        if (!drawingFromTemp.value) {
+          const ids = calculateIntersectedIds(
+            e.x,
+            e.y,
+            visibleFiles,
+            scale.value,
+            translateX.value,
+            translateY.value,
+            canvasLayout.value.x,
+            canvasLayout.value.y,
+            canvasLayout.value.width,
+            canvasLayout.value.height,
+          );
+          activeSelection.value = ids;
+        }
 
         // Path building with point thinning
         const MAX_POINTS = 50;
@@ -814,19 +940,35 @@ export default function HomeScreen() {
           runOnJS(handleShare)(true);
         }
       } else if (isDrawing.value) {
-        const willPerformAction =
-          currentZone === 'trash' || targetFolderId !== null;
+        if (drawingFromTemp.value) {
+          // Drawing from temp zone - handle temp file operations
+          if (currentZone === 'trash') {
+            runOnJS(handleTempDelete)();
+          } else if (targetFolderId) {
+            runOnJS(handleTempDropToFolder)(targetFolderId);
+          } else if (currentZone === 'share') {
+            runOnJS(handleTempShare)();
+          } else {
+            // Ended on canvas - move temp files to current folder
+            runOnJS(handleTempToCanvas)();
+          }
+        } else {
+          const willPerformAction =
+            currentZone === 'trash' || currentZone === 'temp' || targetFolderId !== null;
 
-        if (!willPerformAction) {
-          runOnJS(handleCommitSelection)();
-        }
+          if (!willPerformAction) {
+            runOnJS(handleCommitSelection)();
+          }
 
-        if (currentZone === 'trash') {
-          runOnJS(handleDeleteAction)();
-        } else if (targetFolderId) {
-          runOnJS(handleDropAction)(targetFolderId);
-        } else if (currentZone === 'share') {
-          runOnJS(handleShare)(false);
+          if (currentZone === 'trash') {
+            runOnJS(handleDeleteAction)();
+          } else if (currentZone === 'temp') {
+            runOnJS(handleMoveToTemp)();
+          } else if (targetFolderId) {
+            runOnJS(handleDropAction)(targetFolderId);
+          } else if (currentZone === 'share') {
+            runOnJS(handleShare)(false);
+          }
         }
       }
 
@@ -834,6 +976,7 @@ export default function HomeScreen() {
       draggingFolderId.value = null;
       dropTargetFolderId.value = null;
       hoveredZoneType.value = null;
+      drawingFromTemp.value = false;
       dragX.value = 0;
       dragY.value = 0;
 
@@ -902,7 +1045,7 @@ export default function HomeScreen() {
             ref={folderStripRef}
             folders={currentFolders}
             onFolderPress={handleFolderPress}
-            onNewFolder={handleNewFolder}
+            onNewFolder={isTempView ? undefined : handleNewFolder}
             onFolderLongPress={handleFolderLongPress}
             dropTargetFolderId={dropTargetFolderId}
             hoverColor={gradientEndColor}
@@ -920,7 +1063,11 @@ export default function HomeScreen() {
             zoneBarLayout.value = { x, y, width, height };
           }}
         >
-          <ZoneBar hoveredZoneType={hoveredZoneType} />
+          <ZoneBar
+            hoveredZoneType={hoveredZoneType}
+            tempFileCount={tempFileCount}
+            onTempPress={handleTempPress}
+          />
         </View>
 
         {/* Canvas */}

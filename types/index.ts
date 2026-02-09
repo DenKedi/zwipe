@@ -45,6 +45,9 @@ export interface SelectionResult {
 
 export type ZoneType = 'trash' | 'temp' | 'copy' | 'share' | 'folder-strip';
 
+/** Special parentId used for files stored in the Temp Zone. */
+export const TEMP_FOLDER_ID = '__temp__';
+
 export interface Zone {
   id: string;
   type: ZoneType;

@@ -22,7 +22,7 @@ import { ThemedView } from './themed-view';
 interface FolderStripProps {
   folders: Folder[];
   onFolderPress: (folderId: string) => void;
-  onNewFolder: () => void;
+  onNewFolder?: () => void;
   onFolderLongPress: (id: string, pageX?: number, pageY?: number) => void;
   dropTargetFolderId?: SharedValue<string | null>;
   hoverColor?: string;
@@ -328,10 +328,12 @@ export const FolderStrip = memo(
       >
         {/* Folder List with New Button */}
         <View style={styles.folderHeader2}>
-          <TouchableOpacity style={styles.newButton} onPress={onNewFolder}>
-            <Plus size={16} color='#3b82f6' />
-            <Text style={styles.newButtonText}>New</Text>
-          </TouchableOpacity>
+          {onNewFolder && (
+            <TouchableOpacity style={styles.newButton} onPress={onNewFolder}>
+              <Plus size={16} color='#3b82f6' />
+              <Text style={styles.newButtonText}>New</Text>
+            </TouchableOpacity>
+          )}
           {folders.length > 0 && (
             <View style={styles.folderCount}>
               <FolderIcon size={14} color='#64748b' />

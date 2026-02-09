@@ -1,4 +1,4 @@
-import { StyleSheet, View, Text, Image } from 'react-native';
+import { StyleSheet, View, Text, Image, TouchableOpacity } from 'react-native';
 import { ThemedView } from './themed-view';
 import { useLayoutStore } from '@/store/useLayoutStore';
 import { Zone, ZoneType } from '@/types';
@@ -27,15 +27,19 @@ const iconMap: { [key: string]: any } = {
 
 interface ZoneBarProps {
   hoveredZoneType?: SharedValue<ZoneType | null>;
+  tempFileCount?: number;
+  onTempPress?: () => void;
 }
 
 interface ZoneItemProps {
   zone: Zone;
   isHovered: SharedValue<boolean>;
   onLayout: (e: any) => void;
+  badge?: number;
+  onPress?: () => void;
 }
 
-function ZoneItem({ zone, isHovered, onLayout }: ZoneItemProps) {
+function ZoneItem({ zone, isHovered, onLayout, badge, onPress }: ZoneItemProps) {
   const isDuplicate = zone.type === 'copy';
   
   const animatedContainerStyle = useAnimatedStyle(() => {
@@ -77,11 +81,8 @@ function ZoneItem({ zone, isHovered, onLayout }: ZoneItemProps) {
     );
   }
 
-  return (
-    <Animated.View
-      style={[styles.zoneItem, animatedContainerStyle]}
-      onLayout={onLayout}
-    >
+  const iconContent = (
+    <View>
       <View style={[styles.iconBox, { borderColor: zone.color }]}>
         <Animated.View style={[styles.iconBoxBackground, { backgroundColor: zone.color }, animatedBackgroundStyle]} />
         <Image 
@@ -90,12 +91,32 @@ function ZoneItem({ zone, isHovered, onLayout }: ZoneItemProps) {
           resizeMode="contain"
         />
       </View>
+      {badge != null && badge > 0 && (
+        <View style={[styles.badge, { backgroundColor: zone.color }]}>
+          <Text style={styles.badgeText}>{badge}</Text>
+        </View>
+      )}
+    </View>
+  );
+
+  return (
+    <Animated.View
+      style={[styles.zoneItem, animatedContainerStyle]}
+      onLayout={onLayout}
+    >
+      {onPress ? (
+        <TouchableOpacity activeOpacity={0.7} onPress={onPress}>
+          {iconContent}
+        </TouchableOpacity>
+      ) : (
+        iconContent
+      )}
       <Text style={styles.zoneLabel}>{zone.label}</Text>
     </Animated.View>
   );
 }
 
-export function ZoneBar({ hoveredZoneType }: ZoneBarProps) {
+export function ZoneBar({ hoveredZoneType, tempFileCount, onTempPress }: ZoneBarProps) {
   const registerItem = useLayoutStore((state) => state.registerItem);
   
   // Fallback shared value when hoveredZoneType is not provided
@@ -128,6 +149,8 @@ export function ZoneBar({ hoveredZoneType }: ZoneBarProps) {
           key={zone.id}
           zone={zone}
           isHovered={hoverMap[zone.type]}
+          badge={zone.type === 'temp' ? tempFileCount : undefined}
+          onPress={zone.type === 'temp' ? onTempPress : undefined}
           onLayout={(e) => {
             const layout = e.nativeEvent.layout;
             registerItem(
@@ -215,6 +238,22 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: '500',
     color: '#94a3b8',
+  },
+  badge: {
+    position: 'absolute',
+    top: -6,
+    right: -6,
+    minWidth: 18,
+    height: 18,
+    borderRadius: 9,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 4,
+  },
+  badgeText: {
+    fontSize: 10,
+    fontWeight: '700',
+    color: '#ffffff',
   },
 });
 
