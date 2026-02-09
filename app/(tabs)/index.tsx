@@ -33,7 +33,9 @@ import {
   generateRandomFiles,
   resolveNonOverlappingPosition,
 } from '@/utils/fileSystemHelpers';
+import * as FileSystem from 'expo-file-system';
 import * as ImagePicker from 'expo-image-picker';
+import * as Sharing from 'expo-sharing';
 import { useCallback, useMemo, useRef, useState } from 'react';
 import {
   Alert,
@@ -363,35 +365,80 @@ export default function HomeScreen() {
   // --- Native Share ---
   const handleShare = useCallback(
     async (isFolderShare = false) => {
-      if (!isFolderShare && selectedFileIds.length === 0) {
+      const filesToShare = isFolderShare
+        ? files.filter(f => f.parentId === currentFolderId || (!currentFolderId && !f.parentId))
+        : files.filter(f => selectedFileIds.includes(f.id));
+
+      if (filesToShare.length === 0) {
         showToast('Please select at least one file to share');
         return;
       }
 
       try {
-        const fileCount = isFolderShare
-          ? 'folder'
-          : `${selectedFileIds.length} file${selectedFileIds.length > 1 ? 's' : ''}`;
-        const message = `Check out this ${fileCount} from Zwipe!`;
-        const url = 'https://example.com/shared/files'; // Replace with your actual share URL
+        // Collect shareable image URIs from selected files
+        const shareableFiles = filesToShare
+          .filter((f: any) => f.asset)
+          .map((f: any) => {
+            if (typeof f.asset === 'object' && f.asset.uri) return f.asset.uri;
+            if (typeof f.asset === 'number') {
+              // Bundled require() asset — resolve to URI
+              const resolved = Image.resolveAssetSource(f.asset);
+              return resolved?.uri || null;
+            }
+            return null;
+          })
+          .filter(Boolean) as string[];
 
-        const result = await Share.share({
-          message,
-          url, // iOS only
-          title: 'Share Files', // Android only
-        });
-
-        if (result.action === Share.sharedAction) {
-          showToast('Shared successfully!');
-          if (!isFolderShare) {
-            clearSelection();
-          }
+        if (shareableFiles.length === 0) {
+          // Fallback: share a text message if no image assets
+          const fileCount = `${filesToShare.length} file${filesToShare.length > 1 ? 's' : ''}`;
+          await Share.share({
+            message: `Check out ${fileCount} from Zwipe!`,
+            title: 'Share Files',
+          });
+          return;
         }
+
+        // For a single file, use expo-sharing for native share sheet with file
+        if (shareableFiles.length === 1) {
+          const uri = shareableFiles[0];
+          // If it's a local file, share directly; otherwise copy to cache first
+          let shareUri = uri;
+          if (!uri.startsWith('file://') && !uri.startsWith('content://')) {
+            const filename = `share_${Date.now()}.jpg`;
+            const dest = `${FileSystem.cacheDirectory}${filename}`;
+            await FileSystem.downloadAsync(uri, dest);
+            shareUri = dest;
+          }
+          await Sharing.shareAsync(shareUri, {
+            mimeType: 'image/*',
+            dialogTitle: 'Share Image',
+          });
+          if (!isFolderShare) clearSelection();
+          return;
+        }
+
+        // Multiple files: share one by one isn't great UX, so share the first one
+        // and mention the count
+        const uri = shareableFiles[0];
+        let shareUri = uri;
+        if (!uri.startsWith('file://') && !uri.startsWith('content://')) {
+          const filename = `share_${Date.now()}.jpg`;
+          const dest = `${FileSystem.cacheDirectory}${filename}`;
+          await FileSystem.downloadAsync(uri, dest);
+          shareUri = dest;
+        }
+        await Sharing.shareAsync(shareUri, {
+          mimeType: 'image/*',
+          dialogTitle: `Share ${shareableFiles.length} Images`,
+        });
+        if (!isFolderShare) clearSelection();
       } catch (error: any) {
+        if (error?.message?.includes('dismissed')) return;
         showToast(error.message || 'Failed to share');
       }
     },
-    [selectedFileIds, showToast, clearSelection],
+    [selectedFileIds, files, currentFolderId, showToast, clearSelection],
   );
 
   // --- Test Files ---
@@ -464,15 +511,15 @@ export default function HomeScreen() {
           continue;
         }
 
-        // Place images around the visible canvas center with a looser random spread
+        // Place images as a tight cluster around the visible canvas center
         const cx = layout.width / 2;
         const cy = layout.height / 2;
-        // Increase spread fraction and minimum to loosen grouping
-        const spreadX = Math.min(Math.max(layout.width * 0.45, 160), layout.width / 2 - 20);
-        const spreadY = Math.min(Math.max(layout.height * 0.45, 120), layout.height / 2 - 20);
-        // Give each item a larger per-index offset to reduce clustering
-        const centerOffsetX = (Math.random() * 2 - 1) * spreadX + (i - (assets.length - 1) / 2) * 32;
-        const centerOffsetY = (Math.random() * 2 - 1) * spreadY + (i - (assets.length - 1) / 2) * 24;
+        // Small spread to keep files clustered together
+        const clusterRadius = 60;
+        const angle = (i / assets.length) * Math.PI * 2;
+        const r = Math.sqrt((i + 1) / assets.length) * clusterRadius;
+        const centerOffsetX = Math.cos(angle) * r;
+        const centerOffsetY = Math.sin(angle) * r;
 
         const localX = cx + centerOffsetX;
         const localY = cy + centerOffsetY;
@@ -1241,44 +1288,6 @@ export default function HomeScreen() {
             canvasLayout.value = { x, y, width, height };
           }}
         >
-          <View style={styles.canvasHeader}>
-            <TouchableOpacity
-              style={styles.addTestButton}
-              onPress={handleAddTestFiles}
-            >
-              <Text style={styles.addTestButtonText}>+ Add Test Files</Text>
-            </TouchableOpacity>
-            {/* sort button removed — only shuffle remains (right-aligned) */}
-
-            <TouchableOpacity
-              style={{ width: 28, height: 28, marginTop: 8, justifyContent: 'center', alignItems: 'center', alignSelf: 'flex-end', padding: 4 }}
-              onPress={() => {
-                // Big-bang shuffle: randomly respace all file items (all extensions) around center each run
-                const items = visibleFiles.filter(f => f.type === 'file');
-                if (items.length === 0) return;
-
-                const layout = canvasLayout.value as any;
-                if (!layout || !layout.width || !layout.height) return;
-
-                const cx = layout.width / 2;
-                const cy = layout.height / 2;
-                const maxRadius = Math.min(layout.width, layout.height) * 0.45;
-
-                items.forEach((file) => {
-                  // Polar random distribution biased slightly toward center
-                  const theta = Math.random() * Math.PI * 2;
-                  const r = Math.sqrt(Math.random()) * maxRadius;
-                  const localX = cx + Math.cos(theta) * r;
-                  const localY = cy + Math.sin(theta) * r;
-                  const canvasX = Math.round((localX - translateX.value - (1 - scale.value) * cx) / scale.value);
-                  const canvasY = Math.round((localY - translateY.value - (1 - scale.value) * cy) / scale.value);
-                  moveFile(file.id, canvasX, canvasY);
-                });
-              }}
-            >
-              <Image source={require('@/assets/icons/dark/shuffle.png')} style={{ width: 18, height: 18, tintColor: '#fff' }} />
-            </TouchableOpacity>
-          </View>
           <FileCanvas
             scale={scale}
             translateX={translateX}
