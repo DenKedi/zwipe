@@ -29,7 +29,7 @@ export function ActionBar({
         disabled={!canUndo}
       >
         <Undo2
-          size={20}
+          size={16}
           color={canUndo ? '#f1f5f9' : '#475569'}
           strokeWidth={2.5}
         />
@@ -49,7 +49,7 @@ export function ActionBar({
         disabled={!canRedo}
       >
         <Redo2
-          size={20}
+          size={16}
           color={canRedo ? '#f1f5f9' : '#475569'}
           strokeWidth={2.5}
         />
@@ -73,7 +73,7 @@ export function ActionBar({
         disabled={!hasSelection}
       >
         <Eraser
-          size={20}
+          size={16}
           color={hasSelection ? '#fef2f2' : '#475569'}
           strokeWidth={2.5}
         />
@@ -93,7 +93,7 @@ export function ActionBar({
         style={styles.actionButton}
         onPress={onUpload}
       >
-        <Plus size={20} color={'#f1f5f9'} strokeWidth={2.5} />
+        <Plus size={16} color={'#f1f5f9'} strokeWidth={2.5} />
         <Text style={styles.actionButtonText}>Upload</Text>
       </TouchableOpacity>
     </View>
@@ -109,17 +109,20 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'center',
     alignItems: 'center',
-    gap: 12,
-    paddingHorizontal: 20,
+    gap: 8,
+    paddingHorizontal: 16,
     pointerEvents: 'box-none',
   },
   actionButton: {
+    flex: 1,
+    maxWidth: 100,
     flexDirection: 'row',
+    justifyContent: 'center',
     alignItems: 'center',
-    gap: 6,
+    gap: 4,
     backgroundColor: 'rgba(30, 41, 59, 0.95)',
-    paddingHorizontal: 16,
-    paddingVertical: 10,
+    paddingHorizontal: 8,
+    paddingVertical: 8,
     borderRadius: 12,
     borderWidth: 1,
     borderColor: 'rgba(148, 163, 184, 0.2)',
@@ -135,7 +138,7 @@ const styles = StyleSheet.create({
   },
   actionButtonText: {
     color: '#f1f5f9',
-    fontSize: 14,
+    fontSize: 12,
     fontWeight: '600',
   },
   actionButtonTextDisabled: {

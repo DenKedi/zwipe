@@ -50,7 +50,7 @@ import Animated, {
   useAnimatedStyle,
   useSharedValue,
 } from 'react-native-reanimated';
-import { styles } from './_index.styles';
+import { styles } from '../../styles/tabIndex.styles';
 
 // Zone Colors - matching ZoneBar component
 const zoneColors: Record<ZoneType, string> = {
@@ -368,7 +368,7 @@ export default function HomeScreen() {
         return;
       }
       const result = await ImagePicker.launchImageLibraryAsync({
-        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        mediaTypes: ImagePicker.MediaType.Images,
         quality: 0.8,
         allowsMultipleSelection: true,
       });
