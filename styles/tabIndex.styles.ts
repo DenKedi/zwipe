@@ -6,13 +6,13 @@ export const styles = StyleSheet.create({
     backgroundColor: '#0f172a',
   },
   headerSection: {
-    height: 50,
+    height: '8%',
     backgroundColor: '#1B2535',
     borderBottomWidth: 1,
     borderBottomColor: '#334155',
     paddingHorizontal: 16,
-    paddingVertical: 12,
-    justifyContent: 'center',
+    paddingBottom: 4,
+    justifyContent: 'flex-end',
   },
   addTestButton: {
     backgroundColor: '#3b82f6',
@@ -51,7 +51,7 @@ export const styles = StyleSheet.create({
     flexGrow: 0,
   },
   zoneSection: {
-    height: '15%',
+    height: '13%',
   },
   canvasSection: {
     flex: 1,

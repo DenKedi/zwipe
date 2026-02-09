@@ -123,6 +123,7 @@ export default function HomeScreen() {
   const [breadcrumbs, setBreadcrumbs] = useState<BreadcrumbSegment[]>([
     { id: 'home', name: 'Home' },
   ]);
+  const [headerWidth, setHeaderWidth] = useState(0);
 
   // Action History for undo/redo
   const { execute, undo, redo, canUndo, canRedo } = useActionHistoryStore();
@@ -241,6 +242,93 @@ export default function HomeScreen() {
       ),
     [folders, currentFolderId],
   );
+
+  const visibleBreadcrumbs = useMemo(() => {
+    // If we haven't measured yet, allow normal flow or basic truncation
+    if (headerWidth === 0) {
+       if (breadcrumbs.length <= 4) return breadcrumbs;
+       return [
+         breadcrumbs[0],
+         { id: 'ELLIPSIS', name: '...' },
+         ...breadcrumbs.slice(-2),
+       ];
+    }
+
+    // Constants for estimation (approximate widths for 14px font)
+    const CHAR_WIDTH = 9;
+    const PADDING_H = 32; // container padding
+    const SEPARATOR = 24; // " › " with margins
+    const ELLIPSIS_TEXT_W = 3 * CHAR_WIDTH; 
+    
+    // Safety check
+    if (breadcrumbs.length <= 2) return breadcrumbs;
+
+    const availableWidth = headerWidth - PADDING_H;
+    
+    const first = breadcrumbs[0];
+    const last = breadcrumbs[breadcrumbs.length - 1];
+    
+    const wFirst = first.name.length * CHAR_WIDTH;
+    const wLast = last.name.length * CHAR_WIDTH;
+    
+    // Always show Home and Current
+    // Width used = First + Separator + Last
+    // Note: Separator is needed if length > 1 (which it is)
+    const baseUsed = wFirst + SEPARATOR + wLast;
+    
+    let budget = availableWidth - baseUsed;
+    
+    // Middle items from index 1 to length-2
+    const middle = breadcrumbs.slice(1, -1);
+    
+    // Try to fit all -> if total width fits, return original
+    const allMiddleWidth = middle.reduce((sum, item) => sum + SEPARATOR + (item.name.length * CHAR_WIDTH), 0);
+    if (allMiddleWidth <= budget) {
+      return breadcrumbs;
+    }
+
+    // Otherwise, we must truncate.
+    // Use ellipsis.
+    // Ellipsis adds: Separator + EllipsisText
+    // But since we are replacing some items with ellipsis, functionally we insert it in the chain.
+    // Structure: Home > ... > [Kept Items] > Last
+    // Cost: wFirst + SEPARATOR + wEllipsis + SEPARATOR + [Kept Items Widths] + SEPARATOR + wLast
+    // We already accounted for First + Sep + Last.
+    // We need to account for Ellipsis + its Separator (between Home and Ellipsis)
+    // AND the separator between Ellipsis and the first kept item? 
+    // Wait, let's just sum up the strict cost of the target structure:
+    // [Home] [>] [...] [>] [A] [>] [Current]
+    
+    const costOfEllipsis = SEPARATOR + ELLIPSIS_TEXT_W;
+    const budgetWithEllipsis = budget - costOfEllipsis;
+    
+    const keptMiddle: BreadcrumbSegment[] = [];
+    let currentUsed = 0;
+    
+    // Fill from the right (end of middle)
+    for (let i = middle.length - 1; i >= 0; i--) {
+      const item = middle[i];
+      // Item needs a separator before it (connecting to previous item or ellipsis)
+      const cost = SEPARATOR + (item.name.length * CHAR_WIDTH);
+      
+      if (currentUsed + cost <= budgetWithEllipsis) {
+        keptMiddle.unshift(item); // Prepend to kept list
+        currentUsed += cost;
+      } else {
+        break; 
+      }
+    }
+    
+    // If we kept *all* middle items (unlikely if we failed the initial check, but possible due to estimation variance),
+    // we strictly shouldn't be here. But if we dropped any, valid.
+    
+    return [
+      first,
+      { id: 'ELLIPSIS', name: '...' },
+      ...keptMiddle,
+      last
+    ];
+  }, [breadcrumbs, headerWidth]);
 
   // --- Toast ---
   const showToast = useCallback((message: string) => {
@@ -1215,21 +1303,25 @@ export default function HomeScreen() {
         }}
       >
         {/* Header */}
-        <View style={styles.headerSection}>
+        <View 
+          style={styles.headerSection}
+          onLayout={(e) => setHeaderWidth(e.nativeEvent.layout.width)}
+        >
           <View style={styles.breadcrumbContainer}>
             <ScrollView
               horizontal
               showsHorizontalScrollIndicator={false}
               contentContainerStyle={styles.breadcrumbContent}
             >
-              {breadcrumbs.map((segment, index) => (
+              {visibleBreadcrumbs.map((segment, index) => (
                 <View key={segment.id} style={styles.breadcrumbSegment}>
                   <TouchableOpacity
-                    onPress={() => handleBreadcrumbPress(segment.id)}
+                    onPress={() => segment.id !== 'ELLIPSIS' && handleBreadcrumbPress(segment.id)}
+                    disabled={segment.id === 'ELLIPSIS'}
                   >
                     <Text style={styles.breadcrumbText}>{segment.name}</Text>
                   </TouchableOpacity>
-                  {index < breadcrumbs.length - 1 && (
+                  {index < visibleBreadcrumbs.length - 1 && (
                     <Text style={styles.chevron}> › </Text>
                   )}
                 </View>
