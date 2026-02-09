@@ -9,7 +9,8 @@ import {
   StyleSheet,
   Text,
   TouchableOpacity,
-  View
+  View,
+  Image
 } from 'react-native';
 import Animated, {
   SharedValue,
@@ -328,18 +329,27 @@ export const FolderStrip = memo(
       >
         {/* Folder List with New Button */}
         <View style={styles.folderHeader2}>
-          {onNewFolder && (
+          <View style={styles.logoContainer} pointerEvents="none">
+             <Image 
+                source={require('@/assets/logo/zwipe.png')}
+                style={styles.logo}
+                resizeMode="contain"
+             />
+          </View>
+
+          {onNewFolder ? (
             <TouchableOpacity style={styles.newButton} onPress={onNewFolder}>
               <Plus size={16} color='#3b82f6' />
               <Text style={styles.newButtonText}>New</Text>
             </TouchableOpacity>
-          )}
-          {folders.length > 0 && (
+          ) : <View />}
+
+          {folders.length > 0 ? (
             <View style={styles.folderCount}>
               <FolderIcon size={14} color='#64748b' />
               <Text style={styles.folderCountText}>{folders.length}</Text>
             </View>
-          )}
+          ) : <View />}
         </View>
 
         <View style={styles.stripContainer} onLayout={handleLayout}>
@@ -440,6 +450,23 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
     borderBottomWidth: 1,
     borderBottomColor: '#1e293b',
+    position: 'relative',
+    height: 50,
+  },
+  logoContainer: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    justifyContent: 'center',
+    alignItems: 'center',
+    zIndex: 0, 
+  },
+  logo: {
+    height: '100%',
+    width: 200,
+    opacity: 0.9,
   },
   folderHeader: {
     flexDirection: 'row',
