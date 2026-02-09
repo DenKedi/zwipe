@@ -30,6 +30,7 @@ interface ZoneBarProps {
   tempFileCount?: number;
   onTempPress?: () => void;
   drawingFromTemp?: SharedValue<boolean>;
+  isDuplicationMode?: SharedValue<boolean>;
 }
 
 interface ZoneItemProps {
@@ -38,9 +39,10 @@ interface ZoneItemProps {
   onLayout: (e: any) => void;
   badge?: number;
   onPress?: () => void;
+  isDisabled?: SharedValue<boolean>;
 }
 
-function ZoneItem({ zone, isHovered, onLayout, badge, onPress }: ZoneItemProps) {
+function ZoneItem({ zone, isHovered, onLayout, badge, onPress, isDisabled }: ZoneItemProps) {
   const isDuplicate = zone.type === 'copy';
   
   const animatedContainerStyle = useAnimatedStyle(() => {
@@ -57,11 +59,19 @@ function ZoneItem({ zone, isHovered, onLayout, badge, onPress }: ZoneItemProps) 
     };
   });
 
+  // Greyed-out overlay for disabled state (e.g. delete zone in duplication mode)
+  const animatedDisabledStyle = useAnimatedStyle(() => {
+    const disabled = isDisabled?.value ?? false;
+    return {
+      opacity: withTiming(disabled ? 0.35 : 1, { duration: 200 }),
+    };
+  });
+
   if (isDuplicate) {
     // Gate-style borders for Duplicate zone
     return (
       <Animated.View
-        style={[styles.zoneItem, animatedContainerStyle]}
+        style={[styles.zoneItem, animatedContainerStyle, animatedDisabledStyle]}
         onLayout={onLayout}
       >
         <View style={styles.gateContainer}>
@@ -102,7 +112,7 @@ function ZoneItem({ zone, isHovered, onLayout, badge, onPress }: ZoneItemProps) 
 
   return (
     <Animated.View
-      style={[styles.zoneItem, animatedContainerStyle]}
+      style={[styles.zoneItem, animatedContainerStyle, animatedDisabledStyle]}
       onLayout={onLayout}
     >
       {onPress ? (
@@ -117,7 +127,7 @@ function ZoneItem({ zone, isHovered, onLayout, badge, onPress }: ZoneItemProps) 
   );
 }
 
-export function ZoneBar({ hoveredZoneType, tempFileCount, onTempPress, drawingFromTemp }: ZoneBarProps) {
+export function ZoneBar({ hoveredZoneType, tempFileCount, onTempPress, drawingFromTemp, isDuplicationMode }: ZoneBarProps) {
   const registerItem = useLayoutStore((state) => state.registerItem);
   
   // Fallback shared value when hoveredZoneType is not provided
@@ -127,11 +137,18 @@ export function ZoneBar({ hoveredZoneType, tempFileCount, onTempPress, drawingFr
   const fallbackDrawingFromTemp = useSharedValue(false);
   const activeDrawingFromTemp = drawingFromTemp ?? fallbackDrawingFromTemp;
 
+  const fallbackDupMode = useSharedValue(false);
+  const activeDupMode = isDuplicationMode ?? fallbackDupMode;
+
   // Create derived values for each zone's hover state
   const trashHovered = useDerivedValue(() => activeHoveredType.value === 'trash');
   const tempHovered = useDerivedValue(() => activeHoveredType.value === 'temp' || activeDrawingFromTemp.value);
-  const copyHovered = useDerivedValue(() => activeHoveredType.value === 'copy');
+  // Copy zone stays scaled while in duplication mode
+  const copyHovered = useDerivedValue(() => activeHoveredType.value === 'copy' || activeDupMode.value);
   const shareHovered = useDerivedValue(() => activeHoveredType.value === 'share');
+
+  // Delete zone is disabled (greyed out) in duplication mode
+  const trashDisabled = useDerivedValue(() => activeDupMode.value);
 
   const hoverMap: Record<ZoneType, SharedValue<boolean>> = {
     'trash': trashHovered,
@@ -139,6 +156,10 @@ export function ZoneBar({ hoveredZoneType, tempFileCount, onTempPress, drawingFr
     'copy': copyHovered,
     'share': shareHovered,
     'folder-strip': trashHovered, // Not used but needed for type
+  };
+
+  const disabledMap: Partial<Record<ZoneType, SharedValue<boolean>>> = {
+    'trash': trashDisabled,
   };
 
   return (
@@ -153,6 +174,7 @@ export function ZoneBar({ hoveredZoneType, tempFileCount, onTempPress, drawingFr
           key={zone.id}
           zone={zone}
           isHovered={hoverMap[zone.type]}
+          isDisabled={disabledMap[zone.type]}
           badge={zone.type === 'temp' ? tempFileCount : undefined}
           onPress={zone.type === 'temp' ? onTempPress : undefined}
           onLayout={(e) => {

@@ -9,6 +9,7 @@ import { ZoneBar } from '@/components/ZoneBar';
 import { useFileSystem } from '@/hooks/useFileSystem';
 import {
   createDeleteFilesAction,
+  createDuplicateFilesAction,
   createMoveFilesAction,
   createMoveFolderAction,
   createSelectFilesAction,
@@ -17,6 +18,7 @@ import {
   useActionHistoryStore,
 } from '@/store/actions';
 import { useLayoutStore } from '@/store/useLayoutStore';
+import { useFileSystemStore } from '@/store/useFileSystemStore';
 import { useSelectionStore } from '@/store/useSelectionStore';
 import { BreadcrumbSegment, TEMP_FOLDER_ID, ZoneType } from '@/types';
 import {
@@ -29,6 +31,7 @@ import {
   assignTestImagesToFiles,
   generateFileAt,
   generateRandomFiles,
+  resolveNonOverlappingPosition,
 } from '@/utils/fileSystemHelpers';
 import * as ImagePicker from 'expo-image-picker';
 import { useCallback, useMemo, useRef, useState } from 'react';
@@ -62,6 +65,43 @@ const zoneColors: Record<ZoneType, string> = {
 };
 
 const defaultGradient = { start: '#576ffb', end: '#f865c4' };
+
+/**
+ * Generate a unique copy name for a file in a target folder.
+ * First copy: "photo (copy).jpg"
+ * Subsequent: "photo (copy 2).jpg", "photo (copy 3).jpg", etc.
+ */
+function getUniqueCopyName(
+  originalName: string,
+  existingFiles: { name: string; parentId?: string }[],
+  targetParentId: string | null | undefined,
+): string {
+  const ext = originalName.includes('.') ? '.' + originalName.split('.').pop() : '';
+  // Strip any existing " (copy...)" suffix and extension to get the true base
+  const nameWithoutExt = originalName.replace(/\.[^.]+$/, '');
+  const trueBase = nameWithoutExt.replace(/ \(copy(?: \d+)?\)$/, '');
+
+  // Collect all files in the target folder
+  const siblings = existingFiles.filter(f => {
+    const pid = f.parentId ?? null;
+    const tid = targetParentId ?? null;
+    return pid === tid;
+  });
+
+  const siblingNames = new Set(siblings.map(f => f.name));
+
+  // Try "base (copy).ext" first
+  const firstTry = `${trueBase} (copy)${ext}`;
+  if (!siblingNames.has(firstTry)) return firstTry;
+
+  // Then try "base (copy 2).ext", "base (copy 3).ext", ...
+  let n = 2;
+  while (true) {
+    const candidate = `${trueBase} (copy ${n})${ext}`;
+    if (!siblingNames.has(candidate)) return candidate;
+    n++;
+  }
+}
 
 export default function HomeScreen() {
   const {
@@ -110,6 +150,9 @@ export default function HomeScreen() {
   // Preview state for lightbox
   const [selectedPreviewImage, setSelectedPreviewImage] = useState<any | null>(null);
 
+  // Duplication mode (React state synced from SharedValue for use in JS callbacks)
+  const [isDupMode, setIsDupMode] = useState(false);
+
   // Gradient Colors
   const [gradientStartColor, setGradientStartColor] = useState(
     defaultGradient.start,
@@ -147,6 +190,7 @@ export default function HomeScreen() {
   const autoScrollDir = useSharedValue(0);
   const dropTargetFolderId = useSharedValue<string | null>(null);
   const hoveredZoneType = useSharedValue<ZoneType | null>(null);
+  const isDuplicationMode = useSharedValue(false);
   const zoneBarLayout = useSharedValue({ x: 0, y: 0, width: 0, height: 0 });
 
   // Folder Drag SharedValues
@@ -363,9 +407,16 @@ export default function HomeScreen() {
     // Assign random unique image assets for image files where possible
     const augmented = assignTestImagesToFiles(newFiles, testImages, files);
 
+    // Resolve positions to prevent overlap with existing files
+    const siblings = files
+      .filter(f => (currentFolderId ? f.parentId === currentFolderId : !f.parentId))
+      .map(f => ({ x: f.x, y: f.y }));
+
     // Create files in the store, passing the asset when present
     augmented.forEach(file => {
-      createFile(file.name, file.x, file.y, file.parentId, (file as any).asset);
+      const pos = resolveNonOverlappingPosition(file.x, file.y, siblings);
+      siblings.push(pos);
+      createFile(file.name, pos.x, pos.y, file.parentId, (file as any).asset);
     });
   }, [currentFolderId, createFile, files]);
 
@@ -390,6 +441,11 @@ export default function HomeScreen() {
 
       const layout = canvasLayout.value as any;
 
+      // Collect existing positions for overlap prevention
+      const uploadSiblings = files
+        .filter(f => (currentFolderId ? f.parentId === currentFolderId : !f.parentId))
+        .map(f => ({ x: f.x, y: f.y }));
+
       for (let i = 0; i < assets.length; i++) {
         const a = assets[i];
         const uri = a.uri;
@@ -400,7 +456,9 @@ export default function HomeScreen() {
         const name = `Upload_${Date.now()}_${i}.${ext}`;
 
         if (!layout || !layout.width || !layout.height) {
-          const fallback = generateFileAt(120 + i * 10, 120 + i * 10, name, ext, currentFolderId || undefined);
+          const fallbackPos = resolveNonOverlappingPosition(120 + i * 10, 120 + i * 10, uploadSiblings);
+          uploadSiblings.push(fallbackPos);
+          const fallback = generateFileAt(fallbackPos.x, fallbackPos.y, name, ext, currentFolderId || undefined);
           (fallback as any).asset = { uri };
           createFile(fallback.name, fallback.x, fallback.y, fallback.parentId, (fallback as any).asset);
           continue;
@@ -422,30 +480,67 @@ export default function HomeScreen() {
         const canvasX = Math.round((localX - translateX.value - (1 - scale.value) * cx) / scale.value);
         const canvasY = Math.round((localY - translateY.value - (1 - scale.value) * cy) / scale.value);
 
-        const newFile = generateFileAt(canvasX, canvasY, name, ext, currentFolderId || undefined);
+        const pos = resolveNonOverlappingPosition(canvasX, canvasY, uploadSiblings);
+        uploadSiblings.push(pos);
+        const newFile = generateFileAt(pos.x, pos.y, name, ext, currentFolderId || undefined);
         (newFile as any).asset = { uri };
         createFile(newFile.name, newFile.x, newFile.y, newFile.parentId, (newFile as any).asset);
       }
     } catch (err: any) {
       showToast(err?.message || 'Failed to pick image');
     }
-  }, [canvasLayout, currentFolderId, scale, translateX, translateY, createFile]);
+  }, [canvasLayout, currentFolderId, scale, translateX, translateY, createFile, files]);
 
   // --- File/Folder Actions ---
   const handleDropAction = useCallback(
     (targetId: string) => {
       const filesToMove = files.filter(f => selectedFileIds.includes(f.id));
-      const moveInfos: FileMoveInfo[] = filesToMove.map(file => ({
-        fileId: file.id,
-        previousParentId: file.parentId || null,
-        newParentId: targetId,
-      }));
-
-      moveFilesToFolder(selectedFileIds, targetId);
-      execute(createMoveFilesAction(moveInfos, targetId));
-      clearSelection();
+      if (isDupMode) {
+        // Duplication mode: create copies of selected files in the target folder
+        const duplicatedIds: string[] = [];
+        const store = useFileSystemStore.getState();
+        // Use current store files + already-created duplicates for name uniqueness
+        const allFiles = [...store.files];
+        // Collect occupied positions in the target folder for overlap prevention
+        const occupied = store.files
+          .filter(f => (targetId ? f.parentId === targetId : !f.parentId))
+          .map(f => ({ x: f.x, y: f.y }));
+        filesToMove.forEach((file) => {
+          const newId = `file-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
+          const copyName = getUniqueCopyName(file.name, allFiles, targetId);
+          const pos = resolveNonOverlappingPosition(file.x, file.y, occupied);
+          occupied.push(pos);
+          const duplicate = {
+            ...file,
+            id: newId,
+            name: copyName,
+            extension: copyName.includes('.') ? copyName.split('.').pop() : file.extension,
+            parentId: targetId || undefined,
+            x: pos.x,
+            y: pos.y,
+            createdAt: new Date(),
+            modifiedAt: new Date(),
+          };
+          store.addFile(duplicate);
+          allFiles.push(duplicate as any);
+          duplicatedIds.push(newId);
+        });
+        execute(createDuplicateFilesAction(duplicatedIds, targetId));
+        clearSelection();
+        showToast(`${filesToMove.length} file(s) duplicated`);
+      } else {
+        const moveInfos: FileMoveInfo[] = filesToMove.map(file => ({
+          fileId: file.id,
+          previousParentId: file.parentId || null,
+          newParentId: targetId,
+        }));
+        moveFilesToFolder(selectedFileIds, targetId);
+        execute(createMoveFilesAction(moveInfos, targetId));
+        clearSelection();
+        showToast(`${filesToMove.length} file(s) moved`);
+      }
     },
-    [files, selectedFileIds, moveFilesToFolder, clearSelection, execute],
+    [files, selectedFileIds, moveFilesToFolder, clearSelection, execute, isDupMode, showToast],
   );
 
   const handleDeleteAction = useCallback(() => {
@@ -467,17 +562,51 @@ export default function HomeScreen() {
   // --- Temp Zone Actions ---
   const handleMoveToTemp = useCallback(() => {
     if (selectedFileIds.length === 0) return;
-    const filesToMove = files.filter(f => selectedFileIds.includes(f.id));
-    const moveInfos: FileMoveInfo[] = filesToMove.map(file => ({
-      fileId: file.id,
-      previousParentId: file.parentId || null,
-      newParentId: TEMP_FOLDER_ID,
-    }));
-    moveFilesToFolder(selectedFileIds, TEMP_FOLDER_ID);
-    execute(createMoveFilesAction(moveInfos, TEMP_FOLDER_ID));
-    clearSelection();
-    showToast(`${selectedFileIds.length} file(s) stored in Temp`);
-  }, [selectedFileIds, files, moveFilesToFolder, clearSelection, execute, showToast]);
+    if (isDupMode) {
+      // Duplication mode: create copies in Temp
+      const filesToDup = files.filter(f => selectedFileIds.includes(f.id));
+      const duplicatedIds: string[] = [];
+      const store = useFileSystemStore.getState();
+      const allFiles = [...store.files];
+      const occupied = store.files
+        .filter(f => f.parentId === TEMP_FOLDER_ID)
+        .map(f => ({ x: f.x, y: f.y }));
+      filesToDup.forEach((file) => {
+        const newId = `file-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
+        const copyName = getUniqueCopyName(file.name, allFiles, TEMP_FOLDER_ID);
+        const pos = resolveNonOverlappingPosition(file.x, file.y, occupied);
+        occupied.push(pos);
+        const duplicate = {
+          ...file,
+          id: newId,
+          name: copyName,
+          extension: copyName.includes('.') ? copyName.split('.').pop() : file.extension,
+          parentId: TEMP_FOLDER_ID,
+          x: pos.x,
+          y: pos.y,
+          createdAt: new Date(),
+          modifiedAt: new Date(),
+        };
+        store.addFile(duplicate);
+        allFiles.push(duplicate as any);
+        duplicatedIds.push(newId);
+      });
+      execute(createDuplicateFilesAction(duplicatedIds, TEMP_FOLDER_ID));
+      clearSelection();
+      showToast(`${selectedFileIds.length} file(s) duplicated to Temp`);
+    } else {
+      const filesToMove = files.filter(f => selectedFileIds.includes(f.id));
+      const moveInfos: FileMoveInfo[] = filesToMove.map(file => ({
+        fileId: file.id,
+        previousParentId: file.parentId || null,
+        newParentId: TEMP_FOLDER_ID,
+      }));
+      moveFilesToFolder(selectedFileIds, TEMP_FOLDER_ID);
+      execute(createMoveFilesAction(moveInfos, TEMP_FOLDER_ID));
+      clearSelection();
+      showToast(`${selectedFileIds.length} file(s) stored in Temp`);
+    }
+  }, [selectedFileIds, files, moveFilesToFolder, clearSelection, execute, showToast, isDupMode]);
 
   const handleTempPress = useCallback(() => {
     if (currentFolderId === TEMP_FOLDER_ID) return;
@@ -638,6 +767,16 @@ export default function HomeScreen() {
         current.some((id, i) => id !== prevArr[i])
       ) {
         runOnJS(handleSelectionUpdate)(current);
+      }
+    },
+  );
+
+  // Sync isDuplicationMode SharedValue → React state
+  useAnimatedReaction(
+    () => isDuplicationMode.value,
+    (current, previous) => {
+      if (current !== previous) {
+        runOnJS(setIsDupMode)(current);
       }
     },
   );
@@ -846,7 +985,12 @@ export default function HomeScreen() {
         if (folderId) {
           dropTargetFolderId.value = folderId;
           hoveredZoneType.value = null;
-          runOnJS(handleResetGradient)();
+          // When in duplication mode and hovering a folder, keep green tint
+          if (isDuplicationMode.value) {
+            runOnJS(handleGradientUpdate)('#10b981', '#ffffff');
+          } else {
+            runOnJS(handleResetGradient)();
+          }
         } else {
           dropTargetFolderId.value = null;
           const zoneType = checkZoneIntersection(
@@ -859,12 +1003,26 @@ export default function HomeScreen() {
 
           if (zoneType && zoneType !== hoveredZoneType.value) {
             hoveredZoneType.value = zoneType;
-            runOnJS(handleGradientUpdate)(zoneColors[zoneType], '#ffffff');
+            if (zoneType === 'copy') {
+              // Entering copy zone activates duplication mode
+              isDuplicationMode.value = true;
+              runOnJS(handleGradientUpdate)(zoneColors[zoneType], '#ffffff');
+            } else if (zoneType === 'temp' && isDuplicationMode.value) {
+              // Temp zone + duplication mode: combined green+purple gradient
+              runOnJS(handleGradientUpdate)('#10b981', '#8b5cf6');
+            } else {
+              runOnJS(handleGradientUpdate)(zoneColors[zoneType], '#ffffff');
+            }
           } else if (!zoneType && hoveredZoneType.value !== null) {
             const previousZone = hoveredZoneType.value;
             hoveredZoneType.value = null;
             if (previousZone !== 'copy') {
-              runOnJS(handleResetGradient)();
+              // When leaving any zone while in duplication mode, keep green tint
+              if (isDuplicationMode.value) {
+                runOnJS(handleGradientUpdate)('#10b981', '#ffffff');
+              } else {
+                runOnJS(handleResetGradient)();
+              }
             }
           }
         }
@@ -953,14 +1111,15 @@ export default function HomeScreen() {
             runOnJS(handleTempToCanvas)();
           }
         } else {
+          const inDupMode = isDuplicationMode.value;
           const willPerformAction =
-            currentZone === 'trash' || currentZone === 'temp' || targetFolderId !== null;
+            (!inDupMode && currentZone === 'trash') || currentZone === 'temp' || targetFolderId !== null;
 
           if (!willPerformAction) {
             runOnJS(handleCommitSelection)();
           }
 
-          if (currentZone === 'trash') {
+          if (currentZone === 'trash' && !inDupMode) {
             runOnJS(handleDeleteAction)();
           } else if (currentZone === 'temp') {
             runOnJS(handleMoveToTemp)();
@@ -977,6 +1136,7 @@ export default function HomeScreen() {
       dropTargetFolderId.value = null;
       hoveredZoneType.value = null;
       drawingFromTemp.value = false;
+      isDuplicationMode.value = false;
       dragX.value = 0;
       dragY.value = 0;
 
@@ -1068,6 +1228,7 @@ export default function HomeScreen() {
             tempFileCount={tempFileCount}
             onTempPress={handleTempPress}
             drawingFromTemp={drawingFromTemp}
+            isDuplicationMode={isDuplicationMode}
           />
         </View>
 

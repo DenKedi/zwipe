@@ -1,4 +1,4 @@
-export { createDeleteFilesAction, createMoveFilesAction } from './fileActions';
+export { createDeleteFilesAction, createDuplicateFilesAction, createMoveFilesAction } from './fileActions';
 export { createMoveFolderAction } from './folderActions';
 export {
     createDeselectFilesAction, createSelectFilesAction, createToggleSelectionAction

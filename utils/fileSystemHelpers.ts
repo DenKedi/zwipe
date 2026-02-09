@@ -1,4 +1,64 @@
 import { FileSystemItem, Folder } from '@/types';
+import { FILE_WIDTH, FILE_HEIGHT } from './canvasIntersection';
+
+/**
+ * Maximum allowed overlap fraction (0.2 = 20%).
+ * Files must be separated so they overlap at most this fraction of their size.
+ * minGap = dimension * (1 - MAX_OVERLAP) e.g. 100 * 0.8 = 80px.
+ */
+const MAX_OVERLAP = 0.2;
+const MIN_GAP_X = FILE_WIDTH * (1 - MAX_OVERLAP);   // 80
+const MIN_GAP_Y = FILE_HEIGHT * (1 - MAX_OVERLAP);  // 80
+
+/**
+ * Check whether `(x, y)` overlaps more than 20 % with any occupied position.
+ */
+function isOverlapping(
+  x: number,
+  y: number,
+  occupied: { x: number; y: number }[],
+): boolean {
+  return occupied.some(
+    o => Math.abs(x - o.x) < MIN_GAP_X && Math.abs(y - o.y) < MIN_GAP_Y,
+  );
+}
+
+/**
+ * Find a non-overlapping position near `(desiredX, desiredY)` by spiralling outward.
+ * Returns the first position that doesn't violate the 20 %-overlap constraint
+ * with any of the `existingPositions`.
+ */
+export function resolveNonOverlappingPosition(
+  desiredX: number,
+  desiredY: number,
+  existingPositions: { x: number; y: number }[],
+): { x: number; y: number } {
+  if (!isOverlapping(desiredX, desiredY, existingPositions)) {
+    return { x: desiredX, y: desiredY };
+  }
+
+  // Spiral outward in steps of MIN_GAP
+  const step = MIN_GAP_X;
+  for (let ring = 1; ring <= 30; ring++) {
+    const radius = ring * step;
+    // Try 8 * ring points around the ring
+    const points = 8 * ring;
+    for (let p = 0; p < points; p++) {
+      const angle = (2 * Math.PI * p) / points;
+      const cx = Math.round(desiredX + Math.cos(angle) * radius);
+      const cy = Math.round(desiredY + Math.sin(angle) * radius);
+      if (!isOverlapping(cx, cy, existingPositions)) {
+        return { x: cx, y: cy };
+      }
+    }
+  }
+
+  // Fallback: large random offset
+  return {
+    x: desiredX + Math.round(Math.random() * 300) + 100,
+    y: desiredY + Math.round(Math.random() * 300) + 100,
+  };
+}
 
 const FILE_TYPES = [
   { name: 'Document', ext: 'pdf' },

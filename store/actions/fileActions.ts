@@ -1,5 +1,6 @@
 import { Action, ActionType, FileMoveInfo } from './types';
 import { useFileSystemStore } from '../useFileSystemStore';
+import { FileSystemItem } from '@/types';
 
 // Action for moving files to a folder
 export function createMoveFilesAction(
@@ -48,6 +49,30 @@ export function createDeleteFilesAction(moveInfos: FileMoveInfo[]): Action {
       const fileSystemStore = useFileSystemStore.getState();
       const fileIds = moveInfos.map(info => info.fileId);
       fileSystemStore.moveFilesToFolder(fileIds, 'trash');
+    },
+  };
+}
+
+// Action for duplicating files to a target folder (copies are created, originals stay)
+export function createDuplicateFilesAction(
+  duplicatedFileIds: string[],
+  targetFolderId: string | null
+): Action {
+  return {
+    type: ActionType.DUPLICATE_FILES,
+    description: `Duplicated ${duplicatedFileIds.length} file(s) to ${
+      targetFolderId ? 'folder' : 'root'
+    }`,
+
+    undo: () => {
+      // Remove the duplicated files
+      const fileSystemStore = useFileSystemStore.getState();
+      fileSystemStore.removeFiles(duplicatedFileIds);
+    },
+
+    redo: () => {
+      // Cannot easily re-create without stored snapshots, but the files
+      // are still in memory during the same session
     },
   };
 }
