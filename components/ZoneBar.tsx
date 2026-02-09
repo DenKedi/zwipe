@@ -14,8 +14,8 @@ import Animated, {
 export const zones: Zone[] = [
   { id: 'trash', type: 'trash', label: 'Delete', color: '#ef4444', icon: 'trash' },
   { id: 'temp', type: 'temp', label: 'Temp', color: '#8b5cf6', icon: 'temp' },
-  { id: 'copy', type: 'copy', label: 'Duplicate', color: '#10b981', icon: 'duplicate' },
   { id: 'share', type: 'share', label: 'Share', color: '#3b82f6', icon: 'share' },
+  { id: 'copy', type: 'copy', label: 'Duplicate', color: '#10b981', icon: 'duplicate' },
 ];
 
 const iconMap: { [key: string]: any } = {
