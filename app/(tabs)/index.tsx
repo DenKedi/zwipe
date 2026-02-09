@@ -429,7 +429,7 @@ export default function HomeScreen() {
         return;
       }
       const result = await ImagePicker.launchImageLibraryAsync({
-        mediaTypes: ImagePicker.MediaType.Images,
+        mediaTypes: ['images'],
         quality: 0.8,
         allowsMultipleSelection: true,
       });

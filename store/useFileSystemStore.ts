@@ -64,14 +64,14 @@ export const useFileSystemStore = create<FileSystemState>((set, get) => ({
   updateFile: (fileId, updates) =>
     set(state => ({
       files: state.files.map(f =>
-        f.id === fileId ? { ...f, ...updates, modifiedAt: new Date() } : f
+        f.id === fileId ? { ...f, ...updates, modifiedAt: new Date() } : f,
       ),
     })),
 
   moveFile: (fileId, x, y) =>
     set(state => ({
       files: state.files.map(f =>
-        f.id === fileId ? { ...f, x, y, modifiedAt: new Date() } : f
+        f.id === fileId ? { ...f, x, y, modifiedAt: new Date() } : f,
       ),
     })),
 
@@ -80,7 +80,7 @@ export const useFileSystemStore = create<FileSystemState>((set, get) => ({
       files: state.files.map(f =>
         fileIds.includes(f.id)
           ? { ...f, x: f.x + deltaX, y: f.y + deltaY, modifiedAt: new Date() }
-          : f
+          : f,
       ),
     })),
 
@@ -89,7 +89,7 @@ export const useFileSystemStore = create<FileSystemState>((set, get) => ({
       files: state.files.map(f =>
         fileIds.includes(f.id)
           ? { ...f, parentId: folderId || undefined, modifiedAt: new Date() }
-          : f
+          : f,
       ),
     })),
 
@@ -109,7 +109,7 @@ export const useFileSystemStore = create<FileSystemState>((set, get) => ({
   updateFolder: (folderId, updates) =>
     set(state => ({
       folders: state.folders.map(f =>
-        f.id === folderId ? { ...f, ...updates } : f
+        f.id === folderId ? { ...f, ...updates } : f,
       ),
     })),
 
@@ -142,10 +142,10 @@ export const useFileSystemStore = create<FileSystemState>((set, get) => ({
     const { width, height } = Dimensions.get('window');
     // Adjust center slightly up (-50) because of tab bar / headers usually taking bottom/top space
     const centerX = width / 2;
-    const centerY = height / 2 - 50; 
-    
+    const centerY = height / 2 - 50;
+
     // Use a tighter spread so they look like a single starting group
-    const spread = Math.min(width, height) * 0.4; 
+    const spread = Math.min(width, height) * 0.4;
 
     augmented.forEach(file => {
       // Override random positions from generateRandomFiles to cluster them
