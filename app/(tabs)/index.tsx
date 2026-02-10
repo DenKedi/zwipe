@@ -506,20 +506,34 @@ export default function HomeScreen() {
           return;
         }
 
-        // Multiple files: share one by one isn't great UX, so share the first one
-        // and mention the count
-        const uri = shareableFiles[0];
-        let shareUri = uri;
-        if (!uri.startsWith('file://') && !uri.startsWith('content://')) {
-          const filename = `share_${Date.now()}.jpg`;
-          const dest = `${FileSystem.cacheDirectory}${filename}`;
-          await FileSystem.downloadAsync(uri, dest);
-          shareUri = dest;
+        // Multiple files: download all to cache, then share one by one
+        const cachedUris: string[] = [];
+        for (let i = 0; i < shareableFiles.length; i++) {
+          const uri = shareableFiles[i];
+          let shareUri = uri;
+          if (!uri.startsWith('file://') && !uri.startsWith('content://')) {
+            const ext = uri.split('.').pop()?.split('?')[0] || 'jpg';
+            const filename = `share_${Date.now()}_${i}.${ext}`;
+            const dest = `${FileSystem.cacheDirectory}${filename}`;
+            await FileSystem.downloadAsync(uri, dest);
+            shareUri = dest;
+          }
+          cachedUris.push(shareUri);
         }
-        await Sharing.shareAsync(shareUri, {
-          mimeType: 'image/*',
-          dialogTitle: `Share ${shareableFiles.length} Images`,
-        });
+
+        // Share each file sequentially
+        for (const shareUri of cachedUris) {
+          try {
+            await Sharing.shareAsync(shareUri, {
+              mimeType: 'image/*',
+              dialogTitle: `Share ${shareableFiles.length} Images`,
+            });
+          } catch (e: any) {
+            // User dismissed one share dialog — continue with next
+            if (e?.message?.includes('dismissed')) continue;
+            throw e;
+          }
+        }
         if (!isFolderShare) clearSelection();
       } catch (error: any) {
         if (error?.message?.includes('dismissed')) return;

@@ -123,16 +123,21 @@ export const useFileSystemStore = create<FileSystemState>((set, get) => ({
     // Generate initial dummy data for Root/Home
     const dummyFolders: Folder[] = [
       {
-        id: 'folder-pictures',
-        name: 'Pictures',
+        id: 'folder-lieblingsverein',
+        name: 'Lieblingsverein',
         color: '#fbbf24',
         items: [],
         parentId: undefined,
       },
     ];
 
-    // Generate test files using the same logic as the "+Add Test Files" button
-    const newFiles = generateRandomFiles(6, undefined, false, 0.8);
+    // Generate test files – only images, no sample spreadsheets/presentations
+    const newFiles = generateRandomFiles(
+      testImages.length,
+      undefined,
+      false,
+      1.0,
+    );
     const augmented = assignTestImagesToFiles(newFiles, testImages, []);
 
     const siblings: { x: number; y: number }[] = [];

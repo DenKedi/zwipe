@@ -93,6 +93,11 @@ const FolderCard = memo(function FolderCard({
       style={[styles.folderCard, animatedContainerStyle]}
       onLayout={e => registerItem(folder.id, 'folder', e.nativeEvent.layout)}
     >
+      {/* Subtle folder outline as background */}
+      <View style={styles.folderBgIcon} pointerEvents="none">
+        <FolderIcon size={80} color="#334155" strokeWidth={1} />
+      </View>
+
       <TouchableOpacity
         style={styles.folderCardInner}
         onPress={onPress}
@@ -103,12 +108,9 @@ const FolderCard = memo(function FolderCard({
         onLongPress={() => onLongPress(folder.id, lastTouch.current.x, lastTouch.current.y)}
         activeOpacity={0.7}
       >
-        <View style={styles.folderHeader}>
-          <FolderIcon size={20} color='#fbbf24' fill='#fbbf24' />
-          <Text style={styles.folderName} numberOfLines={1}>
-            {folder.name}
-          </Text>
-        </View>
+        <Text style={styles.folderName} numberOfLines={2}>
+          {folder.name}
+        </Text>
         <View style={styles.folderStats}>
           <View style={styles.statRow}>
             <Text style={styles.statDirect}>{stats.directFolders}</Text>
@@ -513,6 +515,17 @@ const styles = StyleSheet.create({
     borderWidth: 1.5,
     borderColor: '#fbbf24',
     marginRight: 12,
+    overflow: 'hidden',
+  },
+  folderBgIcon: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    justifyContent: 'flex-start',
+    alignItems: 'flex-start',
+    opacity: 0.65,
   },
   folderCardInner: {
     flex: 1,
@@ -522,9 +535,8 @@ const styles = StyleSheet.create({
   folderName: {
     color: '#f1f5f9',
     fontSize: 12,
-    fontWeight: '600',
+    fontWeight: '700',
     flex: 1,
-    marginLeft: 6,
   },
   folderStats: {
     gap: 2,
